@@ -1,24 +1,23 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="zh-Hant">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>HK Bus Live Tracker</title>
+    <title>HK Bus Status Dashboard</title>
     <style>
-        :root { --primary: #004494; --accent: #ffcc00; --danger: #d32f2f; --bg: #f4f7f9; }
+        :root { --primary: #004494; --accent: #ffcc00; --danger: #d32f2f; --bg: #f2f4f7; }
         body { font-family: -apple-system, sans-serif; background: var(--bg); margin: 0; padding: 10px; }
-        .container { display: flex; flex-direction: column; gap: 15px; align-items: center; }
-        .column { width: 100%; max-width: 500px; background: white; border-radius: 15px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); overflow: hidden; }
-        .header { background: var(--primary); color: white; padding: 15px; text-align: center; }
-        .header h2 { margin: 0; font-size: 1.1rem; }
-        .header p { margin: 5px 0 0; font-size: 0.8rem; opacity: 0.8; }
-        .bus-row { display: flex; justify-content: space-between; align-items: center; padding: 15px 20px; border-bottom: 1px solid #eee; }
-        .route-id { font-size: 1.5rem; font-weight: 900; color: var(--primary); width: 70px; }
-        .dest-info { flex-grow: 1; font-size: 0.85rem; color: #555; }
-        .eta-box { text-align: right; min-width: 80px; }
-        .eta-time { font-size: 1.3rem; font-weight: bold; color: var(--danger); }
-        .status-bar { font-size: 0.7rem; text-align: center; padding: 5px; color: #999; }
-        .refresh-btn { position: fixed; bottom: 20px; right: 20px; width: 60px; height: 60px; border-radius: 50%; background: var(--accent); border: none; box-shadow: 0 4px 12px rgba(0,0,0,0.4); font-weight: bold; cursor: pointer; z-index: 100; }
+        .container { display: flex; flex-direction: column; gap: 15px; align-items: center; max-width: 600px; margin: 0 auto; }
+        .column { width: 100%; background: white; border-radius: 12px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); overflow: hidden; }
+        .header { background: var(--primary); color: white; padding: 12px; text-align: center; }
+        .header h2 { margin: 0; font-size: 1rem; letter-spacing: 1px; }
+        .bus-row { display: flex; justify-content: space-between; align-items: center; padding: 12px 15px; border-bottom: 1px solid #eee; }
+        .bus-row:last-child { border-bottom: none; }
+        .route-id { font-size: 1.4rem; font-weight: 900; color: var(--primary); width: 65px; }
+        .dest-info { flex-grow: 1; font-size: 0.85rem; color: #444; }
+        .eta-time { font-size: 1.2rem; font-weight: bold; color: var(--danger); text-align: right; min-width: 60px; }
+        .update-time { font-size: 0.7rem; color: #888; text-align: center; margin-top: 10px; }
+        .refresh-btn { position: fixed; bottom: 20px; right: 20px; width: 55px; height: 55px; border-radius: 50%; background: var(--accent); border: none; box-shadow: 0 4px 8px rgba(0,0,0,0.3); font-weight: bold; cursor: pointer; z-index: 99; }
     </style>
 </head>
 <body>
@@ -26,86 +25,70 @@
     <div class="container">
         <div class="column">
             <div class="header">
-                <h2>TO WORK / NORTH POINT</h2>
-                <p>Start: Yip Yee Mansion (業漁大廈)</p>
+                <h2>往 北角/新光 (業漁大廈 Start)</h2>
             </div>
             <div id="list-work"></div>
         </div>
 
         <div class="column">
             <div class="header">
-                <h2>TO HOME / ABERDEEN</h2>
-                <p>Start: Healthy Village (健康邨)</p>
+                <h2>往 香港仔/田灣 (健康邨 Start)</h2>
             </div>
             <div id="list-home"></div>
         </div>
-        <div id="last-update" class="status-bar"></div>
+        
+        <div id="last-update" class="update-time"></div>
     </div>
 
-    <button class="refresh-btn" onclick="updateAll()">REFRESH</button>
+    <button class="refresh-btn" onclick="updateAll()">刷新</button>
 
 <script>
-    // These are the official Stop IDs we found
-    const STOP_YIP_YEE = "002425";
-    const STOP_HEALTHY = "001217";
-
-    // List of routes you care about
-    const WORK_ROUTES = ["38", "42", "77", "77X", "99"];
-    const HOME_ROUTES = ["38", "42", "77", "99"];
+    const STOPS = { WORK: "002425", HOME: "001217" };
+    const ROUTES_WORK = ["42", "38", "77", "77X", "99"];
+    const ROUTES_HOME = ["77", "77X", "99"];
 
     async function fetchETA(stopId, route) {
         try {
-            // We fetch the "Stop-ETA" endpoint which returns all directions for that route at that stop
-            const response = await fetch(`https://rt.data.gov.hk/v2/transport/citybus/eta/CTB/${stopId}/${route}`);
-            const result = await response.json();
-            
-            if (!result.data || result.data.length === 0) return null;
+            const res = await fetch(`https://rt.data.gov.hk/v2/transport/citybus/eta/CTB/${stopId}/${route}`);
+            const json = await res.json();
+            if (!json.data || json.data.length === 0) return null;
 
-            // Get the first arrival that has a valid time
-            const validArrivals = result.data.filter(b => b.eta);
-            if (validArrivals.length === 0) return null;
+            // Find first arrival with an actual time
+            const valid = json.data.find(b => b.eta);
+            if (!valid) return null;
 
-            const nextBus = validArrivals[0];
-            const diff = Math.round((new Date(nextBus.eta) - new Date()) / 60000);
-            
+            const diff = Math.round((new Date(valid.eta) - new Date()) / 60000);
             return {
-                time: diff <= 0 ? "Arr" : diff + "m",
-                dest: nextBus.dest_tc
+                time: diff <= 0 ? "到站" : diff + "分",
+                dest: valid.dest_tc
             };
-        } catch (e) {
-            return { time: "Err", dest: "" };
-        }
+        } catch { return null; }
     }
 
-    async function updateColumn(elementId, routes, stopId) {
-        const list = document.getElementById(elementId);
-        list.innerHTML = '<p style="text-align:center; padding:20px;">Updating live data...</p>';
+    async function render(elementId, routes, stopId) {
+        const container = document.getElementById(elementId);
+        container.innerHTML = '<p style="text-align:center; padding:10px; font-size:0.8rem;">讀取中...</p>';
         
-        let html = "";
-        for (let routeId of routes) {
-            const data = await fetchETA(stopId, routeId);
+        let rows = "";
+        for (let r of routes) {
+            const data = await fetchETA(stopId, r);
             if (data) {
-                html += `
+                rows += `
                 <div class="bus-row">
-                    <div class="route-id">${routeId}</div>
+                    <div class="route-id">${r}</div>
                     <div class="dest-info">往 ${data.dest}</div>
-                    <div class="eta-box"><span class="eta-time">${data.time}</span></div>
+                    <div class="eta-time">${data.time}</div>
                 </div>`;
             }
         }
-        list.innerHTML = html || '<p style="text-align:center; padding:10px;">No active buses scheduled</p>';
+        container.innerHTML = rows || '<p style="text-align:center; padding:10px; font-size:0.8rem;">暫無班次</p>';
     }
 
     function updateAll() {
-        updateColumn('list-work', WORK_ROUTES, STOP_YIP_YEE);
-        updateColumn('list-home', HOME_ROUTES, STOP_HEALTHY);
-        document.getElementById('last-update').innerText = "Last updated: " + new Date().toLocaleTimeString();
+        render('list-work', ROUTES_WORK, STOPS.WORK);
+        render('list-home', ROUTES_HOME, STOPS.HOME);
+        document.getElementById('last-update').innerText = "最後更新: " + new Date().toLocaleTimeString();
     }
 
-    // Run on start
     updateAll();
-    // Auto refresh every 45 seconds
-    setInterval(updateAll, 45000);
-</script>
-</body>
-</html>
+    setInterval(updateAll
