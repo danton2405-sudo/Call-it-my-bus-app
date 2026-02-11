@@ -9,31 +9,26 @@
         body { font-family: -apple-system, sans-serif; background: var(--bg); margin: 0; padding: 10px; }
         .container { display: flex; flex-direction: column; gap: 15px; align-items: center; max-width: 600px; margin: 0 auto; }
         .column { width: 100%; background: white; border-radius: 12px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); overflow: hidden; }
-        .header { background: var(--primary); color: white; padding: 12px; text-align: center; }
-        .header h2 { margin: 0; font-size: 1rem; letter-spacing: 1px; }
-        .bus-row { display: flex; justify-content: space-between; align-items: center; padding: 12px 15px; border-bottom: 1px solid #eee; }
-        .bus-row:last-child { border-bottom: none; }
-        .route-id { font-size: 1.4rem; font-weight: 900; color: var(--primary); width: 65px; }
-        .dest-info { flex-grow: 1; font-size: 0.85rem; color: #444; }
-        .eta-time { font-size: 1.2rem; font-weight: bold; color: var(--danger); text-align: right; min-width: 60px; }
-        .update-time { font-size: 0.7rem; color: #888; text-align: center; margin-top: 10px; }
-        .refresh-btn { position: fixed; bottom: 20px; right: 20px; width: 55px; height: 55px; border-radius: 50%; background: var(--accent); border: none; box-shadow: 0 4px 8px rgba(0,0,0,0.3); font-weight: bold; cursor: pointer; z-index: 99; }
+        .header { background: var(--primary); color: white; padding: 12px; text-align: center; border-bottom: 2px solid var(--accent); }
+        .header h2 { margin: 0; font-size: 1rem; }
+        .bus-row { display: flex; justify-content: space-between; align-items: center; padding: 15px; border-bottom: 1px solid #eee; }
+        .route-id { font-size: 1.5rem; font-weight: 900; color: var(--primary); width: 65px; }
+        .dest-info { flex-grow: 1; font-size: 0.9rem; color: #444; }
+        .eta-time { font-size: 1.3rem; font-weight: bold; color: var(--danger); text-align: right; min-width: 65px; }
+        .update-time { font-size: 0.75rem; color: #888; text-align: center; margin-top: 15px; }
+        .refresh-btn { position: fixed; bottom: 20px; right: 20px; width: 60px; height: 60px; border-radius: 50%; background: var(--accent); border: none; box-shadow: 0 4px 12px rgba(0,0,0,0.3); font-weight: bold; cursor: pointer; z-index: 99; font-size: 1rem; }
     </style>
 </head>
 <body>
 
     <div class="container">
         <div class="column">
-            <div class="header">
-                <h2>往 北角/新光 (業漁大廈 Start)</h2>
-            </div>
+            <div class="header"><h2>往 北角/新光 (業漁大廈)</h2></div>
             <div id="list-work"></div>
         </div>
 
         <div class="column">
-            <div class="header">
-                <h2>往 香港仔/田灣 (健康邨 Start)</h2>
-            </div>
+            <div class="header"><h2>往 香港仔/田灣 (健康邨)</h2></div>
             <div id="list-home"></div>
         </div>
         
@@ -43,52 +38,72 @@
     <button class="refresh-btn" onclick="updateAll()">刷新</button>
 
 <script>
-    const STOPS = { WORK: "002425", HOME: "001217" };
-    const ROUTES_WORK = ["42", "38", "77", "77X", "99"];
-    const ROUTES_HOME = ["77", "77X", "99"];
+    const STOPS = {
+        WORK: { id: "002425", routes: ["38", "42", "77", "77X", "99"] },
+        HOME: { id: "001217", routes: ["77", "77X", "99"] }
+    };
 
-    async function fetchETA(stopId, route) {
+    async function fetchStopData(stopId, filterRoutes) {
         try {
-            const res = await fetch(`https://rt.data.gov.hk/v2/transport/citybus/eta/CTB/${stopId}/${route}`);
+            // Added CORS Proxy to bypass browser security
+            const baseUrl = `https://rt.data.gov.hk/v1/transport/batch/stop-eta/CTB/${stopId}`;
+            const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(baseUrl)}`;
+            
+            const res = await fetch(proxyUrl);
             const json = await res.json();
-            if (!json.data || json.data.length === 0) return null;
+            
+            if (!json.data) return {};
 
-            // Find first arrival with an actual time
-            const valid = json.data.find(b => b.eta);
-            if (!valid) return null;
-
-            const diff = Math.round((new Date(valid.eta) - new Date()) / 60000);
-            return {
-                time: diff <= 0 ? "到站" : diff + "分",
-                dest: valid.dest_tc
-            };
-        } catch { return null; }
+            const results = {};
+            json.data.forEach(item => {
+                if (filterRoutes.includes(item.route) && item.eta) {
+                    const diff = Math.round((new Date(item.eta) - new Date()) / 60000);
+                    if (diff >= -1) {
+                        if (!results[item.route] || new Date(item.eta) < new Date(results[item.route].eta)) {
+                            results[item.route] = {
+                                time: diff <= 0 ? "到站" : diff + "分",
+                                dest: item.dest_tc
+                            };
+                        }
+                    }
+                }
+            });
+            return results;
+        } catch (e) {
+            console.error(e);
+            return {};
+        }
     }
 
-    async function render(elementId, routes, stopId) {
+    async function updateColumn(elementId, config) {
         const container = document.getElementById(elementId);
-        container.innerHTML = '<p style="text-align:center; padding:10px; font-size:0.8rem;">讀取中...</p>';
+        container.innerHTML = '<p style="text-align:center; padding:20px; color:#666;">數據加載中...</p>';
         
-        let rows = "";
-        for (let r of routes) {
-            const data = await fetchETA(stopId, r);
-            if (data) {
-                rows += `
+        const data = await fetchStopData(config.id, config.routes);
+        
+        let html = "";
+        config.routes.forEach(r => {
+            if (data[r]) {
+                html += `
                 <div class="bus-row">
                     <div class="route-id">${r}</div>
-                    <div class="dest-info">往 ${data.dest}</div>
-                    <div class="eta-time">${data.time}</div>
+                    <div class="dest-info">往 ${data[r].dest}</div>
+                    <div class="eta-time">${data[r].time}</div>
                 </div>`;
             }
-        }
-        container.innerHTML = rows || '<p style="text-align:center; padding:10px; font-size:0.8rem;">暫無班次</p>';
+        });
+        
+        container.innerHTML = html || '<p style="text-align:center; padding:20px; color:#999;">目前無班次資訊</p>';
     }
 
     function updateAll() {
-        render('list-work', ROUTES_WORK, STOPS.WORK);
-        render('list-home', ROUTES_HOME, STOPS.HOME);
+        updateColumn('list-work', STOPS.WORK);
+        updateColumn('list-home', STOPS.HOME);
         document.getElementById('last-update').innerText = "最後更新: " + new Date().toLocaleTimeString();
     }
 
     updateAll();
-    setInterval(updateAll
+    setInterval(updateAll, 30000);
+</script>
+</body>
+</html>
