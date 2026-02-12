@@ -3,20 +3,19 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>HK Bus Status</title>
+    <title>HK Commute Pro</title>
     <style>
         :root { --primary: #004494; --accent: #ffcc00; --danger: #d32f2f; --bg: #f2f4f7; }
         body { font-family: -apple-system, sans-serif; background: var(--bg); margin: 0; padding: 10px; }
-        .container { display: flex; flex-direction: column; gap: 15px; align-items: center; max-width: 600px; margin: 0 auto; }
-        .column { width: 100%; background: white; border-radius: 12px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); overflow: hidden; }
-        .header { background: var(--primary); color: white; padding: 12px; text-align: center; border-bottom: 3px solid var(--accent); }
+        .container { display: flex; flex-direction: column; gap: 15px; align-items: center; max-width: 500px; margin: 0 auto; }
+        .column { width: 100%; background: white; border-radius: 15px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); overflow: hidden; }
+        .header { background: var(--primary); color: white; padding: 15px; text-align: center; border-bottom: 3px solid var(--accent); }
         .header h2 { margin: 0; font-size: 1rem; }
-        .bus-row { display: flex; justify-content: space-between; align-items: center; padding: 15px; border-bottom: 1px solid #eee; }
-        .route-id { font-size: 1.6rem; font-weight: 900; color: var(--primary); width: 65px; }
+        .bus-row { display: flex; justify-content: space-between; align-items: center; padding: 15px 20px; border-bottom: 1px solid #eee; }
+        .route-id { font-size: 1.6rem; font-weight: 900; color: var(--primary); width: 70px; }
         .dest-info { flex-grow: 1; font-size: 0.9rem; color: #444; }
-        .eta-time { font-size: 1.4rem; font-weight: bold; color: var(--danger); text-align: right; min-width: 65px; }
-        .update-time { font-size: 0.75rem; color: #888; text-align: center; margin: 15px 0; }
-        .refresh-btn { position: fixed; bottom: 20px; right: 20px; width: 60px; height: 60px; border-radius: 50%; background: var(--accent); border: none; box-shadow: 0 4px 12px rgba(0,0,0,0.3); font-weight: bold; cursor: pointer; z-index: 99; font-size: 1rem; }
+        .eta-time { font-size: 1.4rem; font-weight: bold; color: var(--danger); min-width: 60px; text-align: right; }
+        .refresh-btn { position: fixed; bottom: 20px; right: 20px; width: 60px; height: 60px; border-radius: 50%; background: var(--accent); border: none; box-shadow: 0 4px 12px rgba(0,0,0,0.3); font-weight: bold; cursor: pointer; }
     </style>
 </head>
 <body>
@@ -31,8 +30,7 @@
             <div class="header"><h2>往 香港仔/田灣 (健康邨)</h2></div>
             <div id="list-home"></div>
         </div>
-        
-        <div id="last-update" class="update-time"></div>
+        <p id="update-status" style="font-size: 0.7rem; color: #888;"></p>
     </div>
 
     <button class="refresh-btn" onclick="updateAll()">刷新</button>
@@ -43,28 +41,27 @@
         HOME: { id: "001217", routes: ["77", "77X", "99"] }
     };
 
-    async function fetchStopData(stopId, filterRoutes) {
+    async function fetchData(stopId, allowedRoutes) {
         try {
-            // Using a reliable Batch ETA API through a CORS Proxy
-            const baseUrl = `https://rt.data.gov.hk/v1/transport/batch/stop-eta/CTB/${stopId}`;
-            const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(baseUrl)}`;
+            const url = `https://rt.data.gov.hk/v1/transport/batch/stop-eta/CTB/${stopId}`;
+            // Proxy to bypass CORS security
+            const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(url)}`;
             
-            const response = await fetch(proxyUrl);
-            const json = await response.json();
-            
+            const res = await fetch(proxyUrl);
+            const json = await res.json();
             if (!json.data) return {};
 
             const results = {};
             json.data.forEach(item => {
-                if (filterRoutes.includes(item.route) && item.eta) {
+                if (allowedRoutes.includes(item.route) && item.eta) {
                     const diff = Math.round((new Date(item.eta) - new Date()) / 60000);
-                    // Keep the soonest arrival for each route
                     if (diff >= -1) {
-                        if (!results[item.route] || new Date(item.eta) < new Date(results[item.route].eta)) {
+                        // Only save the soonest bus for each route
+                        if (!results[item.route] || new Date(item.eta) < new Date(results[item.route].rawEta)) {
                             results[item.route] = {
                                 time: diff <= 0 ? "到站" : diff + "分",
                                 dest: item.dest_tc,
-                                eta: item.eta
+                                rawEta: item.eta
                             };
                         }
                     }
@@ -72,39 +69,35 @@
             });
             return results;
         } catch (e) {
-            console.error("Fetch Error:", e);
             return {};
         }
     }
 
-    async function renderColumn(divId, config) {
+    async function render(divId, config) {
         const container = document.getElementById(divId);
-        container.innerHTML = '<p style="text-align:center; padding:20px; color:#666;">讀取中...</p>';
+        container.innerHTML = '<p style="text-align:center; padding:15px; color:#999;">讀取中...</p>';
         
-        const data = await fetchStopData(config.id, config.routes);
-        
+        const data = await fetchData(config.id, config.routes);
         let html = "";
+        
         config.routes.forEach(r => {
             if (data[r]) {
-                html += `
-                <div class="bus-row">
+                html += `<div class="bus-row">
                     <div class="route-id">${r}</div>
                     <div class="dest-info">往 ${data[r].dest}</div>
                     <div class="eta-time">${data[r].time}</div>
                 </div>`;
             }
         });
-        
-        container.innerHTML = html || '<p style="text-align:center; padding:20px; color:#999;">目前無班次資訊</p>';
+        container.innerHTML = html || '<p style="text-align:center; padding:15px; color:#999;">目前無班次</p>';
     }
 
     function updateAll() {
-        renderColumn('list-work', STOPS.WORK);
-        renderColumn('list-home', STOPS.HOME);
-        document.getElementById('last-update').innerText = "最後更新: " + new Date().toLocaleTimeString();
+        render('list-work', STOPS.WORK);
+        render('list-home', STOPS.HOME);
+        document.getElementById('update-status').innerText = "最後更新: " + new Date().toLocaleTimeString();
     }
 
-    // Initialize and set auto-refresh every 30 seconds
     updateAll();
     setInterval(updateAll, 30000);
 </script>
