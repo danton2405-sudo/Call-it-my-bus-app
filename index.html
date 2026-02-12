@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>HK Bus Status Dashboard</title>
+    <title>HK Bus Live Tracker</title>
     <style>
         :root { --primary: #004494; --accent: #ffcc00; --danger: #d32f2f; --bg: #f2f4f7; }
         body { font-family: -apple-system, sans-serif; background: var(--bg); margin: 0; padding: 10px; }
@@ -16,25 +16,21 @@
         .dest-info { flex-grow: 1; font-size: 0.9rem; color: #444; }
         .eta-time { font-size: 1.3rem; font-weight: bold; color: var(--danger); text-align: right; min-width: 65px; }
         .update-time { font-size: 0.75rem; color: #888; text-align: center; margin-top: 15px; }
-        .refresh-btn { position: fixed; bottom: 20px; right: 20px; width: 60px; height: 60px; border-radius: 50%; background: var(--accent); border: none; box-shadow: 0 4px 12px rgba(0,0,0,0.3); font-weight: bold; cursor: pointer; z-index: 99; font-size: 1rem; }
+        .refresh-btn { position: fixed; bottom: 20px; right: 20px; width: 60px; height: 60px; border-radius: 50%; background: var(--accent); border: none; box-shadow: 0 4px 12px rgba(0,0,0,0.3); font-weight: bold; cursor: pointer; z-index: 99; }
     </style>
 </head>
 <body>
-
     <div class="container">
         <div class="column">
             <div class="header"><h2>往 北角/新光 (業漁大廈)</h2></div>
             <div id="list-work"></div>
         </div>
-
         <div class="column">
             <div class="header"><h2>往 香港仔/田灣 (健康邨)</h2></div>
             <div id="list-home"></div>
         </div>
-        
         <div id="last-update" class="update-time"></div>
     </div>
-
     <button class="refresh-btn" onclick="updateAll()">刷新</button>
 
 <script>
@@ -43,62 +39,59 @@
         HOME: { id: "001217", routes: ["77", "77X", "99"] }
     };
 
-    async function fetchStopData(stopId, filterRoutes) {
+    async function getBusETA(route, stopId) {
         try {
-            // Added CORS Proxy to bypass browser security
-            const baseUrl = `https://rt.data.gov.hk/v1/transport/batch/stop-eta/CTB/${stopId}`;
-            const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(baseUrl)}`;
+            // We fetch the Route-Stop-ETA which is more specific for Citybus
+            const url = `https://rt.data.gov.hk/v2/transport/citybus/eta/CTB/${stopId}/${route}`;
+            const proxyUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(url)}`;
             
-            const res = await fetch(proxyUrl);
-            const json = await res.json();
-            
-            if (!json.data) return {};
+            const response = await fetch(proxyUrl);
+            const rawData = await response.json();
+            const json = JSON.parse(rawData.contents);
 
-            const results = {};
-            json.data.forEach(item => {
-                if (filterRoutes.includes(item.route) && item.eta) {
-                    const diff = Math.round((new Date(item.eta) - new Date()) / 60000);
-                    if (diff >= -1) {
-                        if (!results[item.route] || new Date(item.eta) < new Date(results[item.route].eta)) {
-                            results[item.route] = {
-                                time: diff <= 0 ? "到站" : diff + "分",
-                                dest: item.dest_tc
-                            };
-                        }
-                    }
-                }
-            });
-            return results;
+            if (!json.data || json.data.length === 0) return null;
+
+            // Sort by time and find the next bus
+            const nextBus = json.data.filter(b => b.eta).sort((a, b) => new Date(a.eta) - new Date(b.eta))[0];
+            
+            if (!nextBus) return null;
+
+            const diff = Math.round((new Date(nextBus.eta) - new Date()) / 60000);
+            return {
+                time: diff <= 0 ? "到站" : diff + "分",
+                dest: nextBus.dest_tc
+            };
         } catch (e) {
-            console.error(e);
-            return {};
+            return null;
         }
     }
 
-    async function updateColumn(elementId, config) {
-        const container = document.getElementById(elementId);
-        container.innerHTML = '<p style="text-align:center; padding:20px; color:#666;">數據加載中...</p>';
-        
-        const data = await fetchStopData(config.id, config.routes);
+    async function renderColumn(divId, config) {
+        const container = document.getElementById(divId);
+        container.innerHTML = '<p style="text-align:center; padding:15px; color:#888;">加載中...</p>';
         
         let html = "";
-        config.routes.forEach(r => {
-            if (data[r]) {
+        const promises = config.routes.map(r => getBusETA(r, config.id));
+        const results = await Promise.all(promises);
+
+        config.routes.forEach((route, index) => {
+            const data = results[index];
+            if (data) {
                 html += `
                 <div class="bus-row">
-                    <div class="route-id">${r}</div>
-                    <div class="dest-info">往 ${data[r].dest}</div>
-                    <div class="eta-time">${data[r].time}</div>
+                    <div class="route-id">${route}</div>
+                    <div class="dest-info">往 ${data.dest}</div>
+                    <div class="eta-time">${data.time}</div>
                 </div>`;
             }
         });
-        
-        container.innerHTML = html || '<p style="text-align:center; padding:20px; color:#999;">目前無班次資訊</p>';
+
+        container.innerHTML = html || '<p style="text-align:center; padding:15px; color:#999;">目前無班次資訊</p>';
     }
 
     function updateAll() {
-        updateColumn('list-work', STOPS.WORK);
-        updateColumn('list-home', STOPS.HOME);
+        renderColumn('list-work', STOPS.WORK);
+        renderColumn('list-home', STOPS.HOME);
         document.getElementById('last-update').innerText = "最後更新: " + new Date().toLocaleTimeString();
     }
 
