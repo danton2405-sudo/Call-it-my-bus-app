@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>HK Commute Board</title>
+    <title>HK Bus Live Board</title>
     <style>
         :root { --primary: #004494; --accent: #ffcc00; --danger: #d32f2f; --bg: #f2f4f7; }
         body { font-family: -apple-system, sans-serif; background: var(--bg); margin: 0; padding: 10px; }
@@ -19,4 +19,91 @@
         .dest-zh { font-size: 0.9rem; font-weight: bold; color: #333; display: block; }
         .dest-en { font-size: 0.7rem; color: #666; display: block; text-transform: uppercase; }
         .eta-time { font-size: 1.2rem; font-weight: bold; color: var(--danger); min-width: 75px; text-align: right; }
-        .refresh-btn { position: fixed; bottom: 20px; right: 20px; width: 60px; height: 60px; border-radius: 50%; background: var(--accent); border: none; box-shadow
+        .refresh-btn { position: fixed; bottom: 20px; right: 20px; width: 60px; height: 60px; border-radius: 50%; background: var(--accent); border: none; box-shadow: 0 4px 12px rgba(0,0,0,0.3); font-weight: bold; cursor: pointer; z-index: 100; font-size: 0.8rem; line-height: 1.2; }
+        .footer { font-size: 0.7rem; color: #888; text-align: center; margin-top: 10px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="column">
+            <div class="header">
+                <h2>業漁大廈 Yip Yee Mansion</h2>
+                <p>往 北角 / 新光 To North Point</p>
+            </div>
+            <div id="list-work"></div>
+        </div>
+        <div class="column">
+            <div class="header">
+                <h2>健康邨 Healthy Village</h2>
+                <p>往 香港仔 / 田灣 To Aberdeen</p>
+            </div>
+            <div id="list-home"></div>
+        </div>
+        <div id="update-status" class="footer"></div>
+    </div>
+    <button class="refresh-btn" onclick="updateAll()">刷新<br>REFRESH</button>
+
+<script>
+    const CONFIG = {
+        WORK: { id: "002425", routes: ["38", "42", "77", "77X", "99"] },
+        HOME: { id: "001217", routes: ["38", "42", "77", "99"] }
+    };
+
+    async function fetchSpecificRoute(stopId, route) {
+        try {
+            // Updated to use the secure Vercel rewrite path
+            const res = await fetch(`/api/bus/${stopId}/${route}`);
+            const json = await res.json();
+            if (!json || !json.data || json.data.length === 0) return null;
+            
+            const item = json.data[0];
+            const diff = Math.round((new Date(item.eta) - new Date()) / 60000);
+            return {
+                route: item.route,
+                dest_tc: item.dest_tc, 
+                dest_en: item.dest_en, 
+                diff: diff
+            };
+        } catch (e) { return null; }
+    }
+
+    async function render(divId, config) {
+        const container = document.getElementById(divId);
+        container.innerHTML = '<p style="text-align:center; padding:15px; color:#999;">Loading...</p>';
+        
+        const promises = config.routes.map(r => fetchSpecificRoute(config.id, r));
+        const results = (await Promise.all(promises)).filter(r => r !== null);
+        
+        results.sort((a, b) => a.diff - b.diff);
+
+        let html = "";
+        if (results.length === 0) {
+            html = '<p style="text-align:center; padding:15px; color:#999;">No Service / 暫無班次</p>';
+        } else {
+            results.forEach(b => {
+                const timeStr = b.diff <= 0 ? "到站 Arr" : `${b.diff} 分/min`;
+                html += `
+                <div class="bus-row">
+                    <div class="route-id">${b.route}</div>
+                    <div class="dest-info">
+                        <span class="dest-zh">往 ${b.dest_tc}</span>
+                        <span class="dest-en">To ${b.dest_en}</span>
+                    </div>
+                    <div class="eta-time">${timeStr}</div>
+                </div>`;
+            });
+        }
+        container.innerHTML = html;
+    }
+
+    function updateAll() {
+        render('list-work', CONFIG.WORK);
+        render('list-home', CONFIG.HOME);
+        document.getElementById('update-status').innerText = "Last Update: " + new Date().toLocaleTimeString();
+    }
+
+    updateAll();
+    setInterval(updateAll, 30000);
+</script>
+</body>
+</html>
