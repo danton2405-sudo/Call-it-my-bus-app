@@ -19,7 +19,7 @@
         .dest-zh { font-size: 0.9rem; font-weight: bold; color: #333; display: block; }
         .dest-en { font-size: 0.7rem; color: #666; display: block; text-transform: uppercase; }
         .eta-time { font-size: 1.2rem; font-weight: bold; color: var(--danger); min-width: 75px; text-align: right; }
-        .refresh-btn { position: fixed; bottom: 20px; right: 20px; width: 60px; height: 60px; border-radius: 50%; background: var(--accent); border: none; box-shadow: 0 4px 12px rgba(0,0,0,0.3); font-weight: bold; cursor: pointer; z-index: 100; font-size: 0.8rem; line-height: 1.2; }
+        .refresh-btn { position: fixed; bottom: 20px; right: 20px; width: 60px; height: 60px; border-radius: 50%; background: var(--accent); border: none; box-shadow: 0 4px 12px rgba(0,0,0,0.3); font-weight: bold; cursor: pointer; z-index: 100; font-size: 0.8rem; }
         .footer { font-size: 0.7rem; color: #888; text-align: center; margin-top: 10px; }
     </style>
 </head>
@@ -28,14 +28,14 @@
         <div class="column">
             <div class="header">
                 <h2>業漁大廈 Yip Yee Mansion</h2>
-                <p>往 北角 / 新光 To North Point</p>
+                <p>往 北角/新光 To North Point</p>
             </div>
             <div id="list-work"></div>
         </div>
         <div class="column">
             <div class="header">
                 <h2>健康邨 Healthy Village</h2>
-                <p>往 香港仔 / 田灣 To Aberdeen</p>
+                <p>往 香港仔/田灣 To Aberdeen</p>
             </div>
             <div id="list-home"></div>
         </div>
@@ -45,25 +45,27 @@
 
 <script>
     const CONFIG = {
-        WORK: { id: "002425", routes: ["38", "42", "77", "77X", "99"] },
+        WORK: { id: "002425", routes: ["38", "42", "77", "99"] },
         HOME: { id: "001217", routes: ["38", "42", "77", "99"] }
     };
 
     async function fetchSpecificRoute(stopId, route) {
         try {
-            // Updated to use the secure Vercel rewrite path
             const res = await fetch(`/api/bus/${stopId}/${route}`);
             const json = await res.json();
             if (!json || !json.data || json.data.length === 0) return null;
             
-            const item = json.data[0];
-            const diff = Math.round((new Date(item.eta) - new Date()) / 60000);
-            return {
+            // We find the first ETA that belongs to the correct direction
+            // For Yip Yee (002425) we want North Point bound
+            // For Healthy Village (001217) we want Aberdeen bound
+            const arrivals = json.data.filter(item => item.eta).map(item => ({
                 route: item.route,
-                dest_tc: item.dest_tc, 
-                dest_en: item.dest_en, 
-                diff: diff
-            };
+                dest_tc: item.dest_tc,
+                dest_en: item.dest_en,
+                diff: Math.round((new Date(item.eta) - new Date()) / 60000)
+            })).filter(item => item.diff >= -1);
+
+            return arrivals.length > 0 ? arrivals[0] : null;
         } catch (e) { return null; }
     }
 
