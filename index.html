@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>HK Commute Pro</title>
+    <title>HK Commute Board</title>
     <style>
         :root { --primary: #004494; --accent: #ffcc00; --danger: #d32f2f; --bg: #f2f4f7; }
         body { font-family: -apple-system, sans-serif; background: var(--bg); margin: 0; padding: 10px; }
@@ -11,90 +11,79 @@
         .column { width: 100%; background: white; border-radius: 15px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); overflow: hidden; }
         .header { background: var(--primary); color: white; padding: 15px; text-align: center; border-bottom: 3px solid var(--accent); }
         .header h2 { margin: 0; font-size: 1rem; }
-        .bus-row { display: flex; justify-content: space-between; align-items: center; padding: 15px 20px; border-bottom: 1px solid #eee; }
-        .route-id { font-size: 1.6rem; font-weight: 900; color: var(--primary); width: 70px; }
-        .dest-info { flex-grow: 1; font-size: 0.9rem; color: #444; }
-        .eta-time { font-size: 1.4rem; font-weight: bold; color: var(--danger); min-width: 60px; text-align: right; }
-        .refresh-btn { position: fixed; bottom: 20px; right: 20px; width: 60px; height: 60px; border-radius: 50%; background: var(--accent); border: none; box-shadow: 0 4px 12px rgba(0,0,0,0.3); font-weight: bold; cursor: pointer; }
+        .bus-row { display: flex; justify-content: space-between; align-items: center; padding: 12px 15px; border-bottom: 1px solid #eee; }
+        .route-id { font-size: 1.4rem; font-weight: 900; color: var(--primary); width: 60px; }
+        .dest-info { flex-grow: 1; font-size: 0.85rem; color: #444; padding-left: 5px; }
+        .eta-time { font-size: 1.2rem; font-weight: bold; color: var(--danger); min-width: 65px; text-align: right; }
+        .refresh-btn { position: fixed; bottom: 20px; right: 20px; width: 60px; height: 60px; border-radius: 50%; background: var(--accent); border: none; box-shadow: 0 4px 12px rgba(0,0,0,0.3); font-weight: bold; cursor: pointer; font-size: 1rem; z-index: 100; }
     </style>
 </head>
 <body>
 
     <div class="container">
         <div class="column">
-            <div class="header"><h2>往 北角/新光 (業漁大廈)</h2></div>
-            <div id="list-work"></div>
+            <div class="header"><h2>業漁大廈 (全線班次)</h2></div>
+            <div id="list-yyp"></div>
         </div>
 
         <div class="column">
-            <div class="header"><h2>往 香港仔/田灣 (健康邨)</h2></div>
-            <div id="list-home"></div>
+            <div class="header"><h2>健康邨 (往銅鑼灣/中環)</h2></div>
+            <div id="list-hv"></div>
         </div>
-        <p id="update-status" style="font-size: 0.7rem; color: #888;"></p>
+        <p id="update-status" style="font-size: 0.7rem; color: #888; text-align: center;"></p>
     </div>
 
     <button class="refresh-btn" onclick="updateAll()">刷新</button>
 
 <script>
-    const STOPS = {
-        WORK: { id: "002425", routes: ["38", "42", "77", "77X", "99"] },
-        HOME: { id: "001217", routes: ["77", "77X", "99"] }
-    };
+    const PROXY = "https://corsproxy.io/?";
+    const API_BASE = "https://rt.data.gov.hk/v1/transport/batch/stop-eta/CTB/";
 
-    async function fetchData(stopId, allowedRoutes) {
+    async function fetchLiveBoard(stopId) {
         try {
-            const url = `https://rt.data.gov.hk/v1/transport/batch/stop-eta/CTB/${stopId}`;
-            // Proxy to bypass CORS security
-            const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(url)}`;
-            
-            const res = await fetch(proxyUrl);
+            const url = `${PROXY}${encodeURIComponent(API_BASE + stopId)}`;
+            const res = await fetch(url);
             const json = await res.json();
-            if (!json.data) return {};
+            if (!json.data) return [];
 
-            const results = {};
-            json.data.forEach(item => {
-                if (allowedRoutes.includes(item.route) && item.eta) {
-                    const diff = Math.round((new Date(item.eta) - new Date()) / 60000);
-                    if (diff >= -1) {
-                        // Only save the soonest bus for each route
-                        if (!results[item.route] || new Date(item.eta) < new Date(results[item.route].rawEta)) {
-                            results[item.route] = {
-                                time: diff <= 0 ? "到站" : diff + "分",
-                                dest: item.dest_tc,
-                                rawEta: item.eta
-                            };
-                        }
-                    }
-                }
-            });
-            return results;
+            // Group and sort arrivals by time
+            return json.data
+                .filter(item => item.eta)
+                .map(item => ({
+                    route: item.route,
+                    dest: item.dest_tc,
+                    diff: Math.round((new Date(item.eta) - new Date()) / 60000),
+                    rawTime: new Date(item.eta)
+                }))
+                .filter(item => item.diff >= -1)
+                .sort((a, b) => a.rawTime - b.rawTime)
+                .slice(0, 10); // Show top 10 upcoming buses
         } catch (e) {
-            return {};
+            console.error(e);
+            return [];
         }
     }
 
-    async function render(divId, config) {
+    async function render(divId, stopId) {
         const container = document.getElementById(divId);
         container.innerHTML = '<p style="text-align:center; padding:15px; color:#999;">讀取中...</p>';
         
-        const data = await fetchData(config.id, config.routes);
+        const buses = await fetchLiveBoard(stopId);
         let html = "";
         
-        config.routes.forEach(r => {
-            if (data[r]) {
-                html += `<div class="bus-row">
-                    <div class="route-id">${r}</div>
-                    <div class="dest-info">往 ${data[r].dest}</div>
-                    <div class="eta-time">${data[r].time}</div>
-                </div>`;
-            }
+        buses.forEach(b => {
+            html += `<div class="bus-row">
+                <div class="route-id">${b.route}</div>
+                <div class="dest-info">往 ${b.dest}</div>
+                <div class="eta-time">${b.diff <= 0 ? "到站" : b.diff + "分"}</div>
+            </div>`;
         });
         container.innerHTML = html || '<p style="text-align:center; padding:15px; color:#999;">目前無班次</p>';
     }
 
     function updateAll() {
-        render('list-work', STOPS.WORK);
-        render('list-home', STOPS.HOME);
+        render('list-yyp', '002425');
+        render('list-hv', '001217');
         document.getElementById('update-status').innerText = "最後更新: " + new Date().toLocaleTimeString();
     }
 
