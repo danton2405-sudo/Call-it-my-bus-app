@@ -1,0 +1,8 @@
+{
+  "rewrites": [
+    {
+      "source": "/api/bus/:path*",
+      "destination": "https://rt.data.gov.hk/v1/transport/batch/stop-eta/CTB/:path*"
+    }
+  ]
+}
