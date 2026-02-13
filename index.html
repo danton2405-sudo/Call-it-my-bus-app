@@ -9,88 +9,14 @@
         body { font-family: -apple-system, sans-serif; background: var(--bg); margin: 0; padding: 10px; }
         .container { display: flex; flex-direction: column; gap: 15px; align-items: center; max-width: 500px; margin: 0 auto; }
         .column { width: 100%; background: white; border-radius: 15px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); overflow: hidden; }
-        .header { background: var(--primary); color: white; padding: 15px; text-align: center; border-bottom: 3px solid var(--accent); }
+        .header { background: var(--primary); color: white; padding: 12px; text-align: center; border-bottom: 3px solid var(--accent); }
         .header h2 { margin: 0; font-size: 1rem; }
+        .header p { margin: 2px 0 0; font-size: 0.75rem; opacity: 0.8; }
         .bus-row { display: flex; justify-content: space-between; align-items: center; padding: 12px 15px; border-bottom: 1px solid #eee; }
         .bus-row:last-child { border-bottom: none; }
         .route-id { font-size: 1.4rem; font-weight: 900; color: var(--primary); width: 60px; }
-        .dest-info { flex-grow: 1; font-size: 0.85rem; color: #444; padding-left: 10px; }
-        .eta-time { font-size: 1.2rem; font-weight: bold; color: var(--danger); min-width: 65px; text-align: right; }
-        .refresh-btn { position: fixed; bottom: 20px; right: 20px; width: 60px; height: 60px; border-radius: 50%; background: var(--accent); border: none; box-shadow: 0 4px 12px rgba(0,0,0,0.3); font-weight: bold; cursor: pointer; z-index: 100; display: flex; align-items: center; justify-content: center; }
-        .footer { font-size: 0.7rem; color: #888; text-align: center; margin-top: 10px; }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <div class="column">
-            <div class="header"><h2>業漁大廈 (往北角/新光)</h2></div>
-            <div id="list-work"></div>
-        </div>
-        <div class="column">
-            <div class="header"><h2>健康邨 (往香港仔/田灣)</h2></div>
-            <div id="list-home"></div>
-        </div>
-        <div id="update-status" class="footer"></div>
-    </div>
-    <button class="refresh-btn" onclick="updateAll()">刷新</button>
-
-<script>
-    const STOPS = {
-        WORK: { id: "002425" },
-        HOME: { id: "001217" }
-    };
-
-    async function fetchLiveBoard(stopId) {
-        try {
-            // Securely calls the Vercel internal API path
-            const res = await fetch(`/api/bus/${stopId}`);
-            const json = await res.json();
-            if (!json || !json.data) return [];
-
-            return json.data
-                .filter(item => item.eta)
-                .map(item => ({
-                    route: item.route,
-                    dest: item.dest_tc, // Correct Traditional Chinese destination field
-                    diff: Math.round((new Date(item.eta) - new Date()) / 60000)
-                }))
-                .filter(item => item.diff >= -1)
-                .sort((a, b) => a.diff - b.diff)
-                .slice(0, 10);
-        } catch (e) {
-            console.error("Fetch error:", e);
-            return [];
-        }
-    }
-
-    async function render(divId, stopId) {
-        const container = document.getElementById(divId);
-        const buses = await fetchLiveBoard(stopId);
-        
-        let html = "";
-        if (buses.length === 0) {
-            html = '<p style="text-align:center; padding:15px; color:#999;">目前無班次</p>';
-        } else {
-            buses.forEach(b => {
-                html += `
-                <div class="bus-row">
-                    <div class="route-id">${b.route}</div>
-                    <div class="dest-info">往 ${b.dest || "未知"}</div>
-                    <div class="eta-time">${b.diff <= 0 ? "到站" : b.diff + "分"}</div>
-                </div>`;
-            });
-        }
-        container.innerHTML = html;
-    }
-
-    function updateAll() {
-        render('list-work', STOPS.WORK.id);
-        render('list-home', STOPS.HOME.id);
-        document.getElementById('update-status').innerText = "最後更新: " + new Date().toLocaleTimeString();
-    }
-
-    updateAll();
-    setInterval(updateAll, 30000); // Auto-refresh every 30 seconds
-</script>
-</body>
-</html>
+        .dest-info { flex-grow: 1; padding-left: 10px; }
+        .dest-zh { font-size: 0.9rem; font-weight: bold; color: #333; display: block; }
+        .dest-en { font-size: 0.7rem; color: #666; display: block; text-transform: uppercase; }
+        .eta-time { font-size: 1.2rem; font-weight: bold; color: var(--danger); min-width: 75px; text-align: right; }
+        .refresh-btn { position: fixed; bottom: 20px; right: 20px; width: 60px; height: 60px; border-radius: 50%; background: var(--accent); border: none; box-shadow
