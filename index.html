@@ -3,105 +3,115 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Nearby Bus Finder</title>
+    <title>HK Bus Smart Search</title>
     <style>
         :root { --primary: #004494; --accent: #ffcc00; --danger: #d32f2f; --bg: #f2f4f7; }
         body { font-family: -apple-system, sans-serif; background: var(--bg); margin: 0; padding: 15px; }
-        .gps-btn { width: 100%; padding: 20px; background: var(--accent); border: none; border-radius: 12px; font-weight: bold; font-size: 1rem; cursor: pointer; margin-bottom: 20px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); }
-        .card { background: white; border-radius: 16px; box-shadow: 0 4px 20px rgba(0,0,0,0.08); overflow: hidden; }
-        .header { background: var(--primary); color: white; padding: 15px; text-align: center; }
-        .header h1 { margin: 0; font-size: 1.1rem; }
-        .bus-row { display: flex; justify-content: space-between; align-items: center; padding: 15px; border-bottom: 1px solid #eee; }
-        .route { font-size: 1.5rem; font-weight: 900; color: var(--primary); min-width: 60px; }
-        .dest { flex-grow: 1; padding: 0 10px; }
-        .dest div { font-size: 0.9rem; font-weight: bold; }
-        .dest span { font-size: 0.7rem; color: #666; text-transform: uppercase; }
-        .time { font-size: 1.2rem; font-weight: bold; color: var(--danger); }
-        .loading { text-align: center; padding: 40px; color: #888; font-style: italic; }
+        .card { background: white; border-radius: 16px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); padding: 20px; margin-bottom: 20px; }
+        .input-group { margin-bottom: 15px; }
+        label { display: block; font-size: 0.8rem; color: #666; margin-bottom: 5px; }
+        input, select { width: 100%; padding: 12px; border: 1px solid #ccc; border-radius: 8px; font-size: 1rem; box-sizing: border-box; }
+        .search-btn { width: 100%; padding: 15px; background: var(--accent); border: none; border-radius: 12px; font-weight: bold; cursor: pointer; }
+        .result-header { background: var(--primary); color: white; padding: 15px; border-radius: 12px 12px 0 0; text-align: center; margin-top: 20px; display: none; }
+        .eta-card { background: white; border-radius: 0 0 12px 12px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); display: none; }
+        .bus-row { display: flex; justify-content: space-between; padding: 15px; border-bottom: 1px solid #eee; }
+        .loading { text-align: center; padding: 20px; color: #888; display: none; }
     </style>
 </head>
 <body>
 
-    <button class="gps-btn" onclick="startDiscovery()">📍 Find Nearby Stops / 搜尋附近車站</button>
-
     <div class="card">
-        <div id="stop-header" class="header">
-            <h1 id="display-name">Ready / 準備搜尋</h1>
+        <div class="input-group">
+            <label>Route / 路線</label>
+            <input type="text" id="routeInput" placeholder="e.g. 77, 99, 38">
         </div>
-        <div id="bus-list">
-            <div class="loading">Tap the button to start GPS search.</div>
+        <div class="input-group">
+            <label>Direction / 方向</label>
+            <select id="dirSelect">
+                <option value="outbound">Outbound / 去程</option>
+                <option value="inbound">Inbound / 回程</option>
+            </select>
         </div>
+        <button class="search-btn" onclick="startSmartSearch()">🔍 Find Nearest Stop & ETA</button>
     </div>
 
+    <div id="loader" class="loading">Locating & Fetching Data...</div>
+
+    <div id="resHeader" class="result-header">
+        <h3 id="stopNameDisplay" style="margin:0; font-size:1rem;"></h3>
+    </div>
+    <div id="resBody" class="eta-card"></div>
+
 <script>
-    async function startDiscovery() {
-        const btn = document.querySelector('.gps-btn');
-        btn.innerText = "Locating... / 定位中...";
+    async function startSmartSearch() {
+        const route = document.getElementById('routeInput').value.trim().toUpperCase();
+        const dir = document.getElementById('dirSelect').value;
+        const loader = document.getElementById('loader');
         
-        if (!navigator.geolocation) {
-            alert("GPS not supported.");
-            return;
-        }
-
+        if (!route) return alert("Please enter a route.");
+        
+        loader.style.display = "block";
+        
+        // 1. Get GPS
         navigator.geolocation.getCurrentPosition(async (pos) => {
-            const lat = pos.coords.latitude.toFixed(6);
-            const lon = pos.coords.longitude.toFixed(6);
-            
-            try {
-                // 1. Ask the server for stops NEAR these coordinates
-                const res = await fetch(`/api/nearby/${lat}/${lon}`);
-                const json = await res.json();
-                
-                if (!json.data || json.data.length === 0) {
-                    alert("No stops found nearby.");
-                    btn.innerText = "📍 Search Again";
-                    return;
-                }
+            const userLat = pos.coords.latitude;
+            const userLon = pos.coords.longitude;
 
-                // 2. The API returns ETA data for the closest stop automatically
-                const stopId = json.data[0].stop;
-                // We fetch the stop name from the first result
-                document.getElementById('display-name').innerText = json.data[0].dest_tc + " " + json.data[0].dest_en;
+            try {
+                // 2. Get all stops for this route
+                const routeRes = await fetch(`/api/route-stops/${route}/${dir}`);
+                const routeData = await routeRes.json();
                 
-                renderETAs(json.data);
-                btn.innerText = "📍 Update Location";
+                // 3. Find the closest stop ID from the list
+                let closestStopId = null;
+                let minDistance = Infinity;
+
+                // We need to fetch coordinates for each stop to find the closest one
+                // To avoid too many calls, we'll fetch the ETA batch for the route
+                // and find the one with the smallest distance
+                const stopPromises = routeData.data.map(s => fetch(`/api/stop-info/${s.stop}`).then(r => r.json()));
+                const stopInfos = await Promise.all(stopPromises);
+
+                stopInfos.forEach(info => {
+                    const d = Math.sqrt(Math.pow(userLat - info.data.lat, 2) + Math.pow(userLon - info.data.long, 2));
+                    if (d < minDistance) {
+                        minDistance = d;
+                        closestStopId = info.data.stop;
+                        window.currentStopName = info.data.name_tc + " " + info.data.name_en;
+                    }
+                });
+
+                // 4. Fetch ETA for that specific stop
+                const etaRes = await fetch(`/api/eta/${closestStopId}/${route}`);
+                const etaData = await etaRes.json();
+
+                displayResults(etaData.data);
             } catch (e) {
-                console.error(e);
-                alert("Search failed. Check your connection.");
-                btn.innerText = "📍 Try Again";
+                alert("Error fetching data. Check route/direction.");
+            } finally {
+                loader.style.display = "none";
             }
         });
     }
 
-    function renderETAs(data) {
-        const list = document.getElementById('bus-list');
-        let html = "";
+    function displayResults(data) {
+        const header = document.getElementById('resHeader');
+        const body = document.getElementById('resBody');
+        header.style.display = "block";
+        body.style.display = "block";
         
-        // Filter and sort arrival data
-        const sorted = data
-            .filter(b => b.eta)
-            .map(b => ({
-                route: b.route,
-                zh: b.dest_tc,
-                en: b.dest_en,
-                min: Math.round((new Date(b.eta) - new Date()) / 60000)
-            }))
-            .filter(b => b.min >= -1)
-            .sort((a, b) => a.min - b.min);
+        document.getElementById('stopNameDisplay').innerText = window.currentStopName;
 
-        sorted.forEach(b => {
+        let html = "";
+        data.filter(b => b.eta).forEach(b => {
+            const min = Math.round((new Date(b.eta) - new Date()) / 60000);
             html += `
             <div class="bus-row">
-                <div class="route">${b.route}</div>
-                <div class="dest">
-                    <div>往 ${b.zh}</div>
-                    <span>To ${b.en}</span>
-                </div>
-                <div class="time">${b.min <= 0 ? "Arr" : b.min + "m"}</div>
+                <div style="font-weight:bold; color:#004494;">Route ${b.route}</div>
+                <div style="color:#d32f2f; font-weight:bold;">${min <= 0 ? 'Arr' : min + 'm'}</div>
             </div>`;
         });
-
-        list.innerHTML = html || '<div class="loading">No upcoming buses.</div>';
+        body.innerHTML = html || '<div class="bus-row">No upcoming buses.</div>';
     }
 </script>
 </body>
