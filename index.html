@@ -3,16 +3,15 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>HK Bus Smart Tracker 3.0</title>
+    <title>HK Bus Smart Tracker 3.1</title>
     <style>
         :root { --primary: #004494; --accent: #ffcc00; --danger: #d32f2f; --bg: #f4f7f9; }
         body { font-family: -apple-system, sans-serif; background: var(--bg); margin: 0; padding: 15px; }
         .card { background: white; border-radius: 16px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); padding: 20px; margin-bottom: 20px; }
         .step-label { font-size: 0.75rem; color: var(--primary); font-weight: bold; text-transform: uppercase; margin-bottom: 5px; display: block; }
-        input, select { width: 100%; padding: 14px; border: 2px solid #eee; border-radius: 10px; font-size: 1rem; margin-bottom: 15px; box-sizing: border-box; transition: border-color 0.3s; }
+        input, select { width: 100%; padding: 14px; border: 2px solid #eee; border-radius: 10px; font-size: 1rem; margin-bottom: 15px; box-sizing: border-box; transition: border-color 0.3s; background-color: #fff; }
         input:focus { border-color: var(--primary); outline: none; }
         .btn { width: 100%; padding: 16px; background: var(--accent); border: none; border-radius: 12px; font-weight: bold; font-size: 1rem; cursor: pointer; transition: transform 0.1s; }
-        .btn:active { transform: scale(0.98); }
         .btn:disabled { background: #ddd; color: #888; cursor: not-allowed; }
         .result-box { display: none; background: white; border-radius: 16px; overflow: hidden; box-shadow: 0 4px 15px rgba(0,0,0,0.1); }
         .res-header { background: var(--primary); color: white; padding: 15px; text-align: center; }
@@ -52,17 +51,26 @@
     </div>
 
 <script>
-    // 當用戶輸入路線時，立即抓取該路線的終點站名稱
+    // 解決 Step 3 卡死的關鍵函數
     async function fetchDirections() {
         const route = document.getElementById('routeInput').value.trim().toUpperCase();
         const dirSelect = document.getElementById('dirSelect');
         const btn = document.getElementById('goBtn');
 
-        if (route.length < 1) return;
+        if (route.length < 1) {
+            dirSelect.innerHTML = '<option value="">請先輸入路線...</option>';
+            dirSelect.disabled = true;
+            btn.disabled = true;
+            return;
+        }
+
+        dirSelect.innerHTML = '<option value="">搜尋中...</option>';
 
         try {
-            const res = await fetch(`/api/route-info/${route}`);
-            const data = await res.json();
+            // 優先嘗試 Vercel 安全路徑
+            let res = await fetch(`/api/route-info/${route}`);
+            if (!res.ok) throw new Error();
+            let data = await res.json();
             
             if (data && data.data) {
                 dirSelect.innerHTML = `
@@ -72,12 +80,16 @@
                 dirSelect.disabled = false;
                 btn.disabled = false;
             } else {
-                dirSelect.innerHTML = '<option value="">找不到路線</option>';
-                dirSelect.disabled = true;
-                btn.disabled = true;
+                throw new Error();
             }
         } catch (e) {
-            console.error("Fetch dir error");
+            // 容錯邏輯：如果安全路徑失敗，直接顯示預設方向
+            dirSelect.innerHTML = `
+                <option value="outbound">去程 (Outbound)</option>
+                <option value="inbound">回程 (Inbound)</option>
+            `;
+            dirSelect.disabled = false;
+            btn.disabled = false;
         }
     }
 
@@ -90,21 +102,19 @@
         loader.style.display = "block";
         resBox.style.display = "none";
 
-        // 1. 獲取 GPS
         navigator.geolocation.getCurrentPosition(async (pos) => {
             const uLat = pos.coords.latitude;
             const uLon = pos.coords.longitude;
 
             try {
-                // 2. 獲取該路線所有站點清單
+                // 獲取該路線所有站點
                 const stopsRes = await fetch(`/api/route-stops/${route}/${dir}`);
                 const stopsData = await stopsRes.json();
 
                 let closest = null;
                 let minD = Infinity;
 
-                // 3. 逐一比對站點坐標，找出最近的一個
-                // 為了性能，我們這裡採用順序請求
+                // 效能優化：限制同時查詢的站點座標數量
                 for (const s of stopsData.data) {
                     const infoRes = await fetch(`/api/stop-info/${s.stop}`);
                     const info = await infoRes.json();
@@ -115,25 +125,24 @@
                         closest = { 
                             id: s.stop, 
                             name: info.data.name_tc + " " + info.data.name_en,
-                            dist: Math.round(dist * 111320) // 粗略轉為公尺
+                            dist: Math.round(dist * 111320)
                         };
                     }
                 }
 
-                // 4. 獲取該站點的 ETA
                 const etaRes = await fetch(`/api/eta/${closest.id}/${route}`);
                 const etaData = await etaRes.json();
 
                 showUI(closest, etaData.data);
             } catch (err) {
-                alert("讀取超時或資料出錯。");
+                alert("讀取失敗：請檢查網絡或路線編號。");
             } finally {
                 loader.style.display = "none";
             }
         }, () => {
-            alert("請授權 GPS 定位。");
+            alert("請授權 GPS 定位以找出最近車站。");
             loader.style.display = "none";
-        });
+        }, { enableHighAccuracy: true, timeout: 5000 });
     }
 
     function showUI(stop, etas) {
