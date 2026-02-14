@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>HK Bus Smart Search</title>
+    <title>HK Bus Smart Tracker</title>
     <style>
         :root { --primary: #004494; --accent: #ffcc00; --danger: #d32f2f; --bg: #f2f4f7; }
         body { font-family: -apple-system, sans-serif; background: var(--bg); margin: 0; padding: 15px; }
@@ -35,7 +35,7 @@
         <button class="search-btn" onclick="startSmartSearch()">🔍 Find Nearest Stop & ETA</button>
     </div>
 
-    <div id="loader" class="loading">Locating & Fetching Data...</div>
+    <div id="loader" class="loading">Locating & Matching Stop...</div>
 
     <div id="resHeader" class="result-header">
         <h3 id="stopNameDisplay" style="margin:0; font-size:1rem;"></h3>
@@ -49,69 +49,69 @@
         const loader = document.getElementById('loader');
         
         if (!route) return alert("Please enter a route.");
-        
         loader.style.display = "block";
-        
-        // 1. Get GPS
+
         navigator.geolocation.getCurrentPosition(async (pos) => {
             const userLat = pos.coords.latitude;
             const userLon = pos.coords.longitude;
 
             try {
-                // 2. Get all stops for this route
+                // 1. Get ALL stops for this specific route
                 const routeRes = await fetch(`/api/route-stops/${route}/${dir}`);
                 const routeData = await routeRes.json();
                 
-                // 3. Find the closest stop ID from the list
-                let closestStopId = null;
+                if(!routeData.data || routeData.data.length === 0) throw new Error("Route not found");
+
+                // 2. Efficiently find the closest stop by comparing coordinates
+                let closestStop = null;
                 let minDistance = Infinity;
 
-                // We need to fetch coordinates for each stop to find the closest one
-                // To avoid too many calls, we'll fetch the ETA batch for the route
-                // and find the one with the smallest distance
-                const stopPromises = routeData.data.map(s => fetch(`/api/stop-info/${s.stop}`).then(r => r.json()));
-                const stopInfos = await Promise.all(stopPromises);
-
-                stopInfos.forEach(info => {
-                    const d = Math.sqrt(Math.pow(userLat - info.data.lat, 2) + Math.pow(userLon - info.data.long, 2));
+                for (const s of routeData.data) {
+                    const stopInfoRes = await fetch(`/api/stop-info/${s.stop}`);
+                    const stopInfo = await stopInfoRes.json();
+                    
+                    const d = Math.sqrt(Math.pow(userLat - stopInfo.data.lat, 2) + Math.pow(userLon - stopInfo.data.long, 2));
                     if (d < minDistance) {
                         minDistance = d;
-                        closestStopId = info.data.stop;
-                        window.currentStopName = info.data.name_tc + " " + info.data.name_en;
+                        closestStop = { id: s.stop, name: stopInfo.data.name_tc + " " + stopInfo.data.name_en };
                     }
-                });
+                }
 
-                // 4. Fetch ETA for that specific stop
-                const etaRes = await fetch(`/api/eta/${closestStopId}/${route}`);
+                // 3. Fetch specific ETA for the matched stop
+                const etaRes = await fetch(`/api/eta/${closestStop.id}/${route}`);
                 const etaData = await etaRes.json();
 
-                displayResults(etaData.data);
+                displayResults(closestStop.name, etaData.data);
             } catch (e) {
-                alert("Error fetching data. Check route/direction.");
+                alert("Invalid Route or Connection Error. Please check route number.");
             } finally {
                 loader.style.display = "none";
             }
+        }, () => {
+            alert("GPS permission denied.");
+            loader.style.display = "none";
         });
     }
 
-    function displayResults(data) {
-        const header = document.getElementById('resHeader');
-        const body = document.getElementById('resBody');
-        header.style.display = "block";
-        body.style.display = "block";
-        
-        document.getElementById('stopNameDisplay').innerText = window.currentStopName;
+    function displayResults(stopName, data) {
+        document.getElementById('resHeader').style.display = "block";
+        document.getElementById('resBody').style.display = "block";
+        document.getElementById('stopNameDisplay').innerText = stopName;
 
         let html = "";
-        data.filter(b => b.eta).forEach(b => {
-            const min = Math.round((new Date(b.eta) - new Date()) / 60000);
+        const arrivals = data.filter(b => b.eta).map(b => ({
+            route: b.route,
+            min: Math.round((new Date(b.eta) - new Date()) / 60000)
+        })).filter(b => b.min >= -1).sort((a,b) => a.min - b.min);
+
+        arrivals.forEach(b => {
             html += `
             <div class="bus-row">
                 <div style="font-weight:bold; color:#004494;">Route ${b.route}</div>
-                <div style="color:#d32f2f; font-weight:bold;">${min <= 0 ? 'Arr' : min + 'm'}</div>
+                <div style="color:#d32f2f; font-weight:bold;">${b.min <= 0 ? 'Arr' : b.min + 'm'}</div>
             </div>`;
         });
-        body.innerHTML = html || '<div class="bus-row">No upcoming buses.</div>';
+        document.getElementById('resBody').innerHTML = html || '<div class="bus-row">No service info available.</div>';
     }
 </script>
 </body>
