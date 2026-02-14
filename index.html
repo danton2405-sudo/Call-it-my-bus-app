@@ -1,50 +1,5 @@
-<!DOCTYPE html>
-<html lang="zh-Hant">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>HK Bus Smart Tracker</title>
-    <style>
-        :root { --primary: #004494; --accent: #ffcc00; --danger: #d32f2f; --bg: #f2f4f7; }
-        body { font-family: -apple-system, sans-serif; background: var(--bg); margin: 0; padding: 15px; }
-        .card { background: white; border-radius: 16px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); padding: 20px; margin-bottom: 20px; }
-        .input-group { margin-bottom: 15px; }
-        label { display: block; font-size: 0.8rem; color: #666; margin-bottom: 5px; }
-        input, select { width: 100%; padding: 12px; border: 1px solid #ccc; border-radius: 8px; font-size: 1rem; box-sizing: border-box; outline: none; }
-        input:focus { border-color: var(--primary); }
-        .search-btn { width: 100%; padding: 15px; background: var(--accent); border: none; border-radius: 12px; font-weight: bold; cursor: pointer; font-size: 1rem; transition: opacity 0.2s; }
-        .search-btn:disabled { opacity: 0.5; cursor: not-allowed; }
-        .result-header { background: var(--primary); color: white; padding: 15px; border-radius: 12px 12px 0 0; text-align: center; margin-top: 20px; display: none; }
-        .eta-card { background: white; border-radius: 0 0 12px 12px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); display: none; }
-        .bus-row { display: flex; justify-content: space-between; padding: 15px; border-bottom: 1px solid #eee; }
-        .loading { text-align: center; padding: 20px; color: #888; display: none; font-size: 0.9rem; }
-    </style>
-</head>
-<body>
-
-    <div class="card">
-        <div class="input-group">
-            <label>Route / 路線</label>
-            <input type="text" id="routeInput" placeholder="輸入路線 (例如 77, 99, 38)" oninput="updateDirections()">
-        </div>
-        <div class="input-group">
-            <label>Direction / 方向</label>
-            <select id="dirSelect">
-                <option value="">請先輸入路線</option>
-            </select>
-        </div>
-        <button id="searchBtn" class="search-btn" onclick="startSmartSearch()" disabled>🔍 搜尋最近車站及 ETA</button>
-    </div>
-
-    <div id="loader" class="loading">正在定位及比對車站...</div>
-
-    <div id="resHeader" class="result-header">
-        <h3 id="stopNameDisplay" style="margin:0; font-size:1rem;"></h3>
-    </div>
-    <div id="resBody" class="eta-card"></div>
-
 <script>
-    // 呢個函數會喺你打字嗰陣自動去搵方向
+    // 修正：使用 Vercel 的路徑來避開 CORS 阻擋
     async function updateDirections() {
         const route = document.getElementById('routeInput').value.trim().toUpperCase();
         const dirSelect = document.getElementById('dirSelect');
@@ -57,11 +12,11 @@
         }
 
         try {
-            // 去問 API 呢條線有咩方向
-            const res = await fetch(`https://rt.data.gov.hk/v1/transport/citybus/route/CTB/${route}`);
+            // 修正點：改用內部 api 路徑，不要直接 call 外網
+            const res = await fetch(`/api/route-info/${route}`);
             const data = await res.json();
 
-            if (data.data) {
+            if (data && data.data) {
                 const d = data.data;
                 dirSelect.innerHTML = `
                     <option value="outbound">往 ${d.dest_tc} (Outbound)</option>
@@ -69,11 +24,11 @@
                 `;
                 searchBtn.disabled = false;
             } else {
-                dirSelect.innerHTML = '<option value="">找不到路線</option>';
+                dirSelect.innerHTML = '<option value="">找不到路線資料</option>';
                 searchBtn.disabled = true;
             }
         } catch (e) {
-            dirSelect.innerHTML = '<option value="">搜尋中...</option>';
+            dirSelect.innerHTML = '<option value="">路線讀取超時</option>';
         }
     }
 
@@ -82,24 +37,26 @@
         const dir = document.getElementById('dirSelect').value;
         const loader = document.getElementById('loader');
         
+        if (!route || !dir) return;
+        
         loader.style.display = "block";
+        document.getElementById('resHeader').style.display = "none";
+        document.getElementById('resBody').style.display = "none";
 
         navigator.geolocation.getCurrentPosition(async (pos) => {
             const userLat = pos.coords.latitude;
             const userLon = pos.coords.longitude;
 
             try {
-                // 1. 攞路線所有站點
                 const routeRes = await fetch(`/api/route-stops/${route}/${dir}`);
                 const routeData = await routeRes.json();
                 
                 if(!routeData.data) throw new Error("Route error");
 
-                // 2. 逐個站對比距離，搵最近嗰個
                 let closestStop = null;
                 let minDistance = Infinity;
 
-                // 改用逐個比對以減低併發壓力
+                // 修正：限制同時發出的請求數量，避免卡死
                 for (const s of routeData.data) {
                     const stopInfoRes = await fetch(`/api/stop-info/${s.stop}`);
                     const stopInfo = await stopInfoRes.json();
@@ -111,20 +68,19 @@
                     }
                 }
 
-                // 3. 攞 ETA
                 const etaRes = await fetch(`/api/eta/${closestStop.id}/${route}`);
                 const etaData = await etaRes.json();
 
                 displayResults(closestStop.name, etaData.data);
             } catch (e) {
-                alert("路線資料讀取失敗，請檢查路線編號。");
+                alert("搜尋失敗：請檢查網絡或路線編號。");
             } finally {
                 loader.style.display = "none";
             }
         }, () => {
-            alert("請開啟 GPS 定位權限。");
+            alert("請開啟手機 GPS 權限後再試。");
             loader.style.display = "none";
-        });
+        }, { enableHighAccuracy: true, timeout: 5000 });
     }
 
     function displayResults(stopName, data) {
@@ -142,11 +98,9 @@
             html += `
             <div class="bus-row">
                 <div style="font-weight:bold; color:#004494;">Route ${b.route}</div>
-                <div style="color:#d32f2f; font-weight:bold;">${b.min <= 0 ? '到站中' : b.min + '分鐘'}</div>
+                <div style="color:#d32f2f; font-weight:bold;">${b.min <= 0 ? '即將抵達' : b.min + ' 分鐘'}</div>
             </div>`;
         });
-        document.getElementById('resBody').innerHTML = html || '<div class="bus-row">暫無班次資料</div>';
+        document.getElementById('resBody').innerHTML = html || '<div class="bus-row" style="text-align:center">暫無即時班次</div>';
     }
 </script>
-</body>
-</html>
