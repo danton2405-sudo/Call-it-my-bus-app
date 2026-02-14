@@ -5,32 +5,33 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Nearby Bus Finder</title>
     <style>
-        :root { --primary: #004494; --accent: #ffcc00; --danger: #d32f2f; --bg: #f8f9fa; }
+        :root { --primary: #004494; --accent: #ffcc00; --danger: #d32f2f; --bg: #f2f4f7; }
         body { font-family: -apple-system, sans-serif; background: var(--bg); margin: 0; padding: 15px; }
-        .card { background: white; border-radius: 16px; box-shadow: 0 4px 20px rgba(0,0,0,0.08); overflow: hidden; margin-bottom: 20px; }
-        .header { background: var(--primary); color: white; padding: 20px; text-align: center; }
-        .header h1 { margin: 0; font-size: 1.2rem; }
+        .gps-btn { width: 100%; padding: 20px; background: var(--accent); border: none; border-radius: 12px; font-weight: bold; font-size: 1rem; cursor: pointer; margin-bottom: 20px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); }
+        .card { background: white; border-radius: 16px; box-shadow: 0 4px 20px rgba(0,0,0,0.08); overflow: hidden; }
+        .header { background: var(--primary); color: white; padding: 15px; text-align: center; }
+        .header h1 { margin: 0; font-size: 1.1rem; }
         .bus-row { display: flex; justify-content: space-between; align-items: center; padding: 15px; border-bottom: 1px solid #eee; }
         .route { font-size: 1.5rem; font-weight: 900; color: var(--primary); min-width: 60px; }
         .dest { flex-grow: 1; padding: 0 10px; }
         .dest div { font-size: 0.9rem; font-weight: bold; }
         .dest span { font-size: 0.7rem; color: #666; text-transform: uppercase; }
         .time { font-size: 1.2rem; font-weight: bold; color: var(--danger); }
-        .gps-btn { width: 100%; padding: 18px; background: var(--accent); border: none; border-radius: 12px; font-weight: bold; font-size: 1rem; cursor: pointer; margin-bottom: 15px; }
-        .status { text-align: center; font-size: 0.8rem; color: #888; margin-top: 10px; }
+        .loading { text-align: center; padding: 40px; color: #888; font-style: italic; }
     </style>
 </head>
 <body>
 
-    <button class="gps-btn" onclick="startDiscovery()">📍 Find Nearest Bus Stop / 搜尋最近車站</button>
+    <button class="gps-btn" onclick="startDiscovery()">📍 Find Nearby Stops / 搜尋附近車站</button>
 
     <div class="card">
-        <div class="header">
-            <h1 id="display-name">Ready to Search / 準備搜尋</h1>
+        <div id="stop-header" class="header">
+            <h1 id="display-name">Ready / 準備搜尋</h1>
         </div>
-        <div id="bus-list"></div>
+        <div id="bus-list">
+            <div class="loading">Tap the button to start GPS search.</div>
+        </div>
     </div>
-    <div id="last-update" class="status"></div>
 
 <script>
     async function startDiscovery() {
@@ -38,7 +39,7 @@
         btn.innerText = "Locating... / 定位中...";
         
         if (!navigator.geolocation) {
-            alert("GPS not supported / 不支援定位");
+            alert("GPS not supported.");
             return;
         }
 
@@ -46,72 +47,61 @@
             const lat = pos.coords.latitude.toFixed(6);
             const lon = pos.coords.longitude.toFixed(6);
             
-            // 1. Find the Nearest Stop via API
             try {
-                // This logic identifies the closest CTB stop to your GPS point
-                const res = await fetch(`https://rt.data.gov.hk/v1/transport/citybus/busstop-list/CTB`);
-                const allStops = await res.json();
+                // 1. Ask the server for stops NEAR these coordinates
+                const res = await fetch(`/api/nearby/${lat}/${lon}`);
+                const json = await res.json();
                 
-                let closest = null;
-                let minDistance = Infinity;
-
-                // Simple Haversine-style distance check
-                allStops.data.forEach(stop => {
-                    const dist = Math.sqrt(Math.pow(lat - stop.lat, 2) + Math.pow(lon - stop.long, 2));
-                    if (dist < minDistance) {
-                        minDistance = dist;
-                        closest = stop;
-                    }
-                });
-
-                if (closest) {
-                    document.getElementById('display-name').innerText = closest.name_tc + " " + closest.name_en;
-                    loadETA(closest.stop);
-                    btn.innerText = "📍 Update Current Location";
+                if (!json.data || json.data.length === 0) {
+                    alert("No stops found nearby.");
+                    btn.innerText = "📍 Search Again";
+                    return;
                 }
+
+                // 2. The API returns ETA data for the closest stop automatically
+                const stopId = json.data[0].stop;
+                // We fetch the stop name from the first result
+                document.getElementById('display-name').innerText = json.data[0].dest_tc + " " + json.data[0].dest_en;
+                
+                renderETAs(json.data);
+                btn.innerText = "📍 Update Location";
             } catch (e) {
-                alert("Error finding stop / 搜尋失敗");
+                console.error(e);
+                alert("Search failed. Check your connection.");
+                btn.innerText = "📍 Try Again";
             }
         });
     }
 
-    async function loadETA(stopId) {
+    function renderETAs(data) {
         const list = document.getElementById('bus-list');
-        list.innerHTML = '<p style="text-align:center; padding:20px;">Fetching ETAs...</p>';
+        let html = "";
         
-        try {
-            const res = await fetch(`/api/eta/${stopId}`);
-            const json = await res.json();
-            
-            let html = "";
-            const sorted = json.data
-                .filter(b => b.eta)
-                .map(b => ({
-                    route: b.route,
-                    zh: b.dest_tc,
-                    en: b.dest_en,
-                    min: Math.round((new Date(b.eta) - new Date()) / 60000)
-                }))
-                .filter(b => b.min >= -1)
-                .sort((a, b) => a.min - b.min);
+        // Filter and sort arrival data
+        const sorted = data
+            .filter(b => b.eta)
+            .map(b => ({
+                route: b.route,
+                zh: b.dest_tc,
+                en: b.dest_en,
+                min: Math.round((new Date(b.eta) - new Date()) / 60000)
+            }))
+            .filter(b => b.min >= -1)
+            .sort((a, b) => a.min - b.min);
 
-            sorted.forEach(b => {
-                html += `
-                <div class="bus-row">
-                    <div class="route">${b.route}</div>
-                    <div class="dest">
-                        <div>往 ${b.zh}</div>
-                        <span>To ${b.en}</span>
-                    </div>
-                    <div class="time">${b.min <= 0 ? "Arr" : b.min + "m"}</div>
-                </div>`;
-            });
+        sorted.forEach(b => {
+            html += `
+            <div class="bus-row">
+                <div class="route">${b.route}</div>
+                <div class="dest">
+                    <div>往 ${b.zh}</div>
+                    <span>To ${b.en}</span>
+                </div>
+                <div class="time">${b.min <= 0 ? "Arr" : b.min + "m"}</div>
+            </div>`;
+        });
 
-            list.innerHTML = html || '<p style="text-align:center; padding:20px;">No buses found</p>';
-            document.getElementById('last-update').innerText = "Updated: " + new Date().toLocaleTimeString();
-        } catch (e) {
-            list.innerHTML = '<p style="text-align:center; padding:20px;">Data Error</p>';
-        }
+        list.innerHTML = html || '<div class="loading">No upcoming buses.</div>';
     }
 </script>
 </body>
