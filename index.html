@@ -10,12 +10,14 @@
         .card { background: white; border-radius: 16px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); padding: 20px; margin-bottom: 20px; }
         .input-group { margin-bottom: 15px; }
         label { display: block; font-size: 0.8rem; color: #666; margin-bottom: 5px; }
-        input, select { width: 100%; padding: 12px; border: 1px solid #ccc; border-radius: 8px; font-size: 1rem; box-sizing: border-box; }
-        .search-btn { width: 100%; padding: 15px; background: var(--accent); border: none; border-radius: 12px; font-weight: bold; cursor: pointer; }
+        input, select { width: 100%; padding: 12px; border: 1px solid #ccc; border-radius: 8px; font-size: 1rem; box-sizing: border-box; outline: none; }
+        input:focus { border-color: var(--primary); }
+        .search-btn { width: 100%; padding: 15px; background: var(--accent); border: none; border-radius: 12px; font-weight: bold; cursor: pointer; font-size: 1rem; transition: opacity 0.2s; }
+        .search-btn:disabled { opacity: 0.5; cursor: not-allowed; }
         .result-header { background: var(--primary); color: white; padding: 15px; border-radius: 12px 12px 0 0; text-align: center; margin-top: 20px; display: none; }
         .eta-card { background: white; border-radius: 0 0 12px 12px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); display: none; }
         .bus-row { display: flex; justify-content: space-between; padding: 15px; border-bottom: 1px solid #eee; }
-        .loading { text-align: center; padding: 20px; color: #888; display: none; }
+        .loading { text-align: center; padding: 20px; color: #888; display: none; font-size: 0.9rem; }
     </style>
 </head>
 <body>
@@ -23,19 +25,18 @@
     <div class="card">
         <div class="input-group">
             <label>Route / 路線</label>
-            <input type="text" id="routeInput" placeholder="e.g. 77, 99, 38">
+            <input type="text" id="routeInput" placeholder="輸入路線 (例如 77, 99, 38)" oninput="updateDirections()">
         </div>
         <div class="input-group">
             <label>Direction / 方向</label>
             <select id="dirSelect">
-                <option value="outbound">Outbound / 去程</option>
-                <option value="inbound">Inbound / 回程</option>
+                <option value="">請先輸入路線</option>
             </select>
         </div>
-        <button class="search-btn" onclick="startSmartSearch()">🔍 Find Nearest Stop & ETA</button>
+        <button id="searchBtn" class="search-btn" onclick="startSmartSearch()" disabled>🔍 搜尋最近車站及 ETA</button>
     </div>
 
-    <div id="loader" class="loading">Locating & Matching Stop...</div>
+    <div id="loader" class="loading">正在定位及比對車站...</div>
 
     <div id="resHeader" class="result-header">
         <h3 id="stopNameDisplay" style="margin:0; font-size:1rem;"></h3>
@@ -43,12 +44,44 @@
     <div id="resBody" class="eta-card"></div>
 
 <script>
+    // 呢個函數會喺你打字嗰陣自動去搵方向
+    async function updateDirections() {
+        const route = document.getElementById('routeInput').value.trim().toUpperCase();
+        const dirSelect = document.getElementById('dirSelect');
+        const searchBtn = document.getElementById('searchBtn');
+
+        if (route.length < 1) {
+            dirSelect.innerHTML = '<option value="">請先輸入路線</option>';
+            searchBtn.disabled = true;
+            return;
+        }
+
+        try {
+            // 去問 API 呢條線有咩方向
+            const res = await fetch(`https://rt.data.gov.hk/v1/transport/citybus/route/CTB/${route}`);
+            const data = await res.json();
+
+            if (data.data) {
+                const d = data.data;
+                dirSelect.innerHTML = `
+                    <option value="outbound">往 ${d.dest_tc} (Outbound)</option>
+                    <option value="inbound">往 ${d.orig_tc} (Inbound)</option>
+                `;
+                searchBtn.disabled = false;
+            } else {
+                dirSelect.innerHTML = '<option value="">找不到路線</option>';
+                searchBtn.disabled = true;
+            }
+        } catch (e) {
+            dirSelect.innerHTML = '<option value="">搜尋中...</option>';
+        }
+    }
+
     async function startSmartSearch() {
         const route = document.getElementById('routeInput').value.trim().toUpperCase();
         const dir = document.getElementById('dirSelect').value;
         const loader = document.getElementById('loader');
         
-        if (!route) return alert("Please enter a route.");
         loader.style.display = "block";
 
         navigator.geolocation.getCurrentPosition(async (pos) => {
@@ -56,16 +89,17 @@
             const userLon = pos.coords.longitude;
 
             try {
-                // 1. Get ALL stops for this specific route
+                // 1. 攞路線所有站點
                 const routeRes = await fetch(`/api/route-stops/${route}/${dir}`);
                 const routeData = await routeRes.json();
                 
-                if(!routeData.data || routeData.data.length === 0) throw new Error("Route not found");
+                if(!routeData.data) throw new Error("Route error");
 
-                // 2. Efficiently find the closest stop by comparing coordinates
+                // 2. 逐個站對比距離，搵最近嗰個
                 let closestStop = null;
                 let minDistance = Infinity;
 
+                // 改用逐個比對以減低併發壓力
                 for (const s of routeData.data) {
                     const stopInfoRes = await fetch(`/api/stop-info/${s.stop}`);
                     const stopInfo = await stopInfoRes.json();
@@ -77,18 +111,18 @@
                     }
                 }
 
-                // 3. Fetch specific ETA for the matched stop
+                // 3. 攞 ETA
                 const etaRes = await fetch(`/api/eta/${closestStop.id}/${route}`);
                 const etaData = await etaRes.json();
 
                 displayResults(closestStop.name, etaData.data);
             } catch (e) {
-                alert("Invalid Route or Connection Error. Please check route number.");
+                alert("路線資料讀取失敗，請檢查路線編號。");
             } finally {
                 loader.style.display = "none";
             }
         }, () => {
-            alert("GPS permission denied.");
+            alert("請開啟 GPS 定位權限。");
             loader.style.display = "none";
         });
     }
@@ -108,10 +142,10 @@
             html += `
             <div class="bus-row">
                 <div style="font-weight:bold; color:#004494;">Route ${b.route}</div>
-                <div style="color:#d32f2f; font-weight:bold;">${b.min <= 0 ? 'Arr' : b.min + 'm'}</div>
+                <div style="color:#d32f2f; font-weight:bold;">${b.min <= 0 ? '到站中' : b.min + '分鐘'}</div>
             </div>`;
         });
-        document.getElementById('resBody').innerHTML = html || '<div class="bus-row">No service info available.</div>';
+        document.getElementById('resBody').innerHTML = html || '<div class="bus-row">暫無班次資料</div>';
     }
 </script>
 </body>
