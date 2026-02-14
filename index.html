@@ -3,147 +3,158 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>HK Bus GPS Tracker</title>
+    <title>HK Bus Smart Tracker 3.0</title>
     <style>
-        :root { --primary: #004494; --accent: #ffcc00; --danger: #d32f2f; --bg: #f2f4f7; }
+        :root { --primary: #004494; --accent: #ffcc00; --danger: #d32f2f; --bg: #f4f7f9; }
         body { font-family: -apple-system, sans-serif; background: var(--bg); margin: 0; padding: 15px; }
         .card { background: white; border-radius: 16px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); padding: 20px; margin-bottom: 20px; }
-        .input-group { margin-bottom: 15px; }
-        label { display: block; font-size: 0.8rem; color: #666; margin-bottom: 5px; }
-        input, select { width: 100%; padding: 12px; border: 1px solid #ccc; border-radius: 8px; font-size: 1rem; box-sizing: border-box; outline: none; }
-        .search-btn { width: 100%; padding: 15px; background: var(--accent); border: none; border-radius: 12px; font-weight: bold; cursor: pointer; font-size: 1rem; transition: opacity 0.2s; }
-        .search-btn:disabled { opacity: 0.5; cursor: not-allowed; }
-        .result-header { background: var(--primary); color: white; padding: 15px; border-radius: 12px 12px 0 0; text-align: center; margin-top: 20px; display: none; }
-        .eta-card { background: white; border-radius: 0 0 12px 12px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); display: none; }
-        .bus-row { display: flex; justify-content: space-between; padding: 15px; border-bottom: 1px solid #eee; }
-        .loading { text-align: center; padding: 20px; color: #888; display: none; font-size: 0.9rem; }
+        .step-label { font-size: 0.75rem; color: var(--primary); font-weight: bold; text-transform: uppercase; margin-bottom: 5px; display: block; }
+        input, select { width: 100%; padding: 14px; border: 2px solid #eee; border-radius: 10px; font-size: 1rem; margin-bottom: 15px; box-sizing: border-box; transition: border-color 0.3s; }
+        input:focus { border-color: var(--primary); outline: none; }
+        .btn { width: 100%; padding: 16px; background: var(--accent); border: none; border-radius: 12px; font-weight: bold; font-size: 1rem; cursor: pointer; transition: transform 0.1s; }
+        .btn:active { transform: scale(0.98); }
+        .btn:disabled { background: #ddd; color: #888; cursor: not-allowed; }
+        .result-box { display: none; background: white; border-radius: 16px; overflow: hidden; box-shadow: 0 4px 15px rgba(0,0,0,0.1); }
+        .res-header { background: var(--primary); color: white; padding: 15px; text-align: center; }
+        .bus-row { display: flex; justify-content: space-between; align-items: center; padding: 15px; border-bottom: 1px solid #eee; }
+        .route-badge { background: #eef2f7; padding: 5px 10px; border-radius: 6px; font-weight: bold; color: var(--primary); }
+        .time-text { color: var(--danger); font-weight: bold; font-size: 1.1rem; }
+        .loading-overlay { display: none; text-align: center; padding: 20px; color: #666; font-size: 0.9rem; }
     </style>
 </head>
 <body>
 
     <div class="card">
-        <div class="input-group">
-            <label>Route / 路線</label>
-            <input type="text" id="routeInput" placeholder="輸入路線 (例如 77, 38)" oninput="updateDirections()">
-        </div>
-        <div class="input-group">
-            <label>Direction / 方向</label>
-            <select id="dirSelect">
-                <option value="">請先輸入路線</option>
-            </select>
-        </div>
-        <button id="searchBtn" class="search-btn" onclick="startSmartSearch()" disabled>🔍 搜尋最近車站及 ETA</button>
+        <span class="step-label">Step 1: Bus Company</span>
+        <select id="coSelect">
+            <option value="CTB">Citybus 城巴</option>
+        </select>
+
+        <span class="step-label">Step 2: Route Number</span>
+        <input type="text" id="routeInput" placeholder="例如: 77, 99, 38" oninput="fetchDirections()">
+
+        <span class="step-label">Step 3: Direction</span>
+        <select id="dirSelect" disabled>
+            <option value="">請先輸入路線...</option>
+        </select>
+
+        <button id="goBtn" class="btn" onclick="findNearestAndShow()" disabled>📍 匹配最近車站及查看 ETA</button>
     </div>
 
-    <div id="loader" class="loading">正在定位及比對車站...</div>
+    <div id="loader" class="loading-overlay">正在計算距離並獲取即時班次...</div>
 
-    <div id="resHeader" class="result-header">
-        <h3 id="stopNameDisplay" style="margin:0; font-size:1rem;"></h3>
+    <div id="resultBox" class="result-box">
+        <div class="res-header">
+            <div id="stopName" style="font-weight: bold;"></div>
+            <div id="distText" style="font-size: 0.75rem; opacity: 0.8; margin-top: 4px;"></div>
+        </div>
+        <div id="etaList"></div>
     </div>
-    <div id="resBody" class="eta-card"></div>
 
 <script>
-    // 實時獲取方向資訊，避免卡在「搜尋中」
-    async function updateDirections() {
+    // 當用戶輸入路線時，立即抓取該路線的終點站名稱
+    async function fetchDirections() {
         const route = document.getElementById('routeInput').value.trim().toUpperCase();
         const dirSelect = document.getElementById('dirSelect');
-        const searchBtn = document.getElementById('searchBtn');
+        const btn = document.getElementById('goBtn');
 
-        if (route.length < 1) {
-            dirSelect.innerHTML = '<option value="">請先輸入路線</option>';
-            searchBtn.disabled = true;
-            return;
-        }
+        if (route.length < 1) return;
 
         try {
-            // 使用 Vercel 代理路徑
             const res = await fetch(`/api/route-info/${route}`);
             const data = await res.json();
-
+            
             if (data && data.data) {
-                const d = data.data;
                 dirSelect.innerHTML = `
-                    <option value="outbound">往 ${d.dest_tc} (To ${d.dest_en})</option>
-                    <option value="inbound">往 ${d.orig_tc} (To ${d.orig_en})</option>
+                    <option value="outbound">往 ${data.data.dest_tc} (${data.data.dest_en})</option>
+                    <option value="inbound">往 ${data.data.orig_tc} (${data.data.orig_en})</option>
                 `;
-                searchBtn.disabled = false;
+                dirSelect.disabled = false;
+                btn.disabled = false;
             } else {
                 dirSelect.innerHTML = '<option value="">找不到路線</option>';
-                searchBtn.disabled = true;
+                dirSelect.disabled = true;
+                btn.disabled = true;
             }
         } catch (e) {
-            dirSelect.innerHTML = '<option value="">正在嘗試連線...</option>';
+            console.error("Fetch dir error");
         }
     }
 
-    async function startSmartSearch() {
+    async function findNearestAndShow() {
         const route = document.getElementById('routeInput').value.trim().toUpperCase();
         const dir = document.getElementById('dirSelect').value;
         const loader = document.getElementById('loader');
-        
-        loader.style.display = "block";
-        document.getElementById('resHeader').style.display = "none";
-        document.getElementById('resBody').style.display = "none";
+        const resBox = document.getElementById('resultBox');
 
+        loader.style.display = "block";
+        resBox.style.display = "none";
+
+        // 1. 獲取 GPS
         navigator.geolocation.getCurrentPosition(async (pos) => {
-            const userLat = pos.coords.latitude;
-            const userLon = pos.coords.longitude;
+            const uLat = pos.coords.latitude;
+            const uLon = pos.coords.longitude;
 
             try {
-                const routeRes = await fetch(`/api/route-stops/${route}/${dir}`);
-                const routeData = await routeRes.json();
-                
-                if(!routeData.data) throw new Error("Route error");
+                // 2. 獲取該路線所有站點清單
+                const stopsRes = await fetch(`/api/route-stops/${route}/${dir}`);
+                const stopsData = await stopsRes.json();
 
-                let closestStop = null;
-                let minDistance = Infinity;
+                let closest = null;
+                let minD = Infinity;
 
-                // 逐個站點比對距離
-                for (const s of routeData.data) {
-                    const stopInfoRes = await fetch(`/api/stop-info/${s.stop}`);
-                    const stopInfo = await stopInfoRes.json();
+                // 3. 逐一比對站點坐標，找出最近的一個
+                // 為了性能，我們這裡採用順序請求
+                for (const s of stopsData.data) {
+                    const infoRes = await fetch(`/api/stop-info/${s.stop}`);
+                    const info = await infoRes.json();
                     
-                    const d = Math.sqrt(Math.pow(userLat - stopInfo.data.lat, 2) + Math.pow(userLon - stopInfo.data.long, 2));
-                    if (d < minDistance) {
-                        minDistance = d;
-                        closestStop = { id: s.stop, name: stopInfo.data.name_tc + " " + stopInfo.data.name_en };
+                    const dist = Math.sqrt(Math.pow(uLat - info.data.lat, 2) + Math.pow(uLon - info.data.long, 2));
+                    if (dist < minD) {
+                        minD = dist;
+                        closest = { 
+                            id: s.stop, 
+                            name: info.data.name_tc + " " + info.data.name_en,
+                            dist: Math.round(dist * 111320) // 粗略轉為公尺
+                        };
                     }
                 }
 
-                const etaRes = await fetch(`/api/eta/${closestStop.id}/${route}`);
+                // 4. 獲取該站點的 ETA
+                const etaRes = await fetch(`/api/eta/${closest.id}/${route}`);
                 const etaData = await etaRes.json();
 
-                displayResults(closestStop.name, etaData.data);
-            } catch (e) {
-                alert("數據讀取失敗，請稍後再試。");
+                showUI(closest, etaData.data);
+            } catch (err) {
+                alert("讀取超時或資料出錯。");
             } finally {
                 loader.style.display = "none";
             }
         }, () => {
-            alert("請開啟 GPS 定位權限。");
+            alert("請授權 GPS 定位。");
             loader.style.display = "none";
         });
     }
 
-    function displayResults(stopName, data) {
-        document.getElementById('resHeader').style.display = "block";
-        document.getElementById('resBody').style.display = "block";
-        document.getElementById('stopNameDisplay').innerText = stopName;
+    function showUI(stop, etas) {
+        document.getElementById('resultBox').style.display = "block";
+        document.getElementById('stopName').innerText = stop.name;
+        document.getElementById('distText').innerText = `距離您約 ${stop.dist} 公尺`;
 
         let html = "";
-        const arrivals = data.filter(b => b.eta).map(b => ({
-            route: b.route,
-            min: Math.round((new Date(b.eta) - new Date()) / 60000)
-        })).filter(b => b.min >= -1).sort((a,b) => a.min - b.min);
+        const valid = etas.filter(e => e.eta).map(e => ({
+            route: e.route,
+            min: Math.round((new Date(e.eta) - new Date()) / 60000)
+        })).filter(e => e.min >= -1).sort((a,b) => a.min - b.min);
 
-        arrivals.forEach(b => {
+        valid.forEach(e => {
             html += `
             <div class="bus-row">
-                <div style="font-weight:bold; color:#004494;">Route ${b.route}</div>
-                <div style="color:#d32f2f; font-weight:bold;">${b.min <= 0 ? '到站中' : b.min + ' 分鐘'}</div>
+                <div class="route-badge">${e.route}</div>
+                <div class="time-text">${e.min <= 0 ? '即將抵達' : e.min + ' 分鐘'}</div>
             </div>`;
         });
-        document.getElementById('resBody').innerHTML = html || '<div class="bus-row">暫無班次</div>';
+        document.getElementById('etaList').innerHTML = html || '<div class="bus-row">目前無班次資訊</div>';
     }
 </script>
 </body>
