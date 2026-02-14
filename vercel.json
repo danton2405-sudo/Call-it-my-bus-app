@@ -2,7 +2,7 @@
   "rewrites": [
     {
       "source": "/api/nearby/:lat/:lon",
-      "destination": "https://rt.data.gov.hk/v1/transport/citybus/stop-eta/CTB/:lat/:lon"
+      "destination": "https://rt.data.gov.hk/v1/transport/citybus/busstop-eta/CTB/:lat/:lon"
     },
     {
       "source": "/api/eta/:stop",
