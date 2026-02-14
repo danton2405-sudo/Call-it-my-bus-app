@@ -1,6 +1,10 @@
 {
   "rewrites": [
     {
+      "source": "/api/route-info/:route",
+      "destination": "https://rt.data.gov.hk/v1/transport/citybus/route/CTB/:route"
+    },
+    {
       "source": "/api/route-stops/:route/:dir",
       "destination": "https://rt.data.gov.hk/v1/transport/citybus/route-stop/CTB/:route/:dir"
     },
