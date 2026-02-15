@@ -2,7 +2,7 @@
 <html lang="zh-HK">
 <head>
   <meta charset="UTF-8">
-  <title>Citybus Tracker - 38/42/77/77X/99</title>
+  <title>Bus Tracker - Citybus 38/42/77/77X/99/98/94A/91</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <style>
     body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; max-width: 400px; margin: 0 auto; padding: 20px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); min-height: 100vh; color: #333; }
@@ -21,10 +21,12 @@
     th { background: #f8f9fa; }
     .eta { font-size: 20px; color: #007AFF; font-weight: bold; }
     .distance { color: #666; font-size: 14px; }
+    .routes-list { font-size: 12px; color: #888; text-align: center; margin-top: 10px; }
   </style>
 </head>
 <body>
-  <h1>🚌 Citybus Tracker</h1>
+  <h1>🚌 Bus Tracker</h1>
+  <div class="routes-list">Citybus: 38, 42, 77, 77X, 99, 98, 94A, 91</div>
   
   <div class="card">
     <div id="locationStatus" class="status-error">未取得位置，點「取得位置」</div>
@@ -36,17 +38,20 @@
       <option value="77">77 (Tin Wan ↔ Shau Kei Wan)</option>
       <option value="77X">77X (Wah Kwai ↔ Sai Wan Ho)</option>
       <option value="99">99 (Shau Kei Wan ↔ South Horizons)</option>
+      <option value="98">98 (Lei Tung ↔ Aberdeen)</option>
+      <option value="94A">94A (Wah Fu - Lei Tung Circular)</option>
+      <option value="91">91 (Central ↔ Ap Lei Chau)</option>
     </select>
     
     <label>方向</label>
     <select id="direction">
       <option value="outbound">去市區 (Outbound)</option>
-      <option value="inbound">去筲箕灣/南區 (Inbound)</option>
+      <option value="inbound">去南區/筲箕灣 (Inbound)</option>
     </select>
     
     <button id="getLocation">📍 取得我位置</button>
     <button id="findNearest">🔍 搵最近巴士站</button>
-    <button id="getETA">⏰ 查實時到站 (預設班次)</button>
+    <button id="getETA">⏰ 查班次</button>
   </div>
 
   <div class="card">
@@ -60,19 +65,20 @@
   </div>
 
   <script>
-    // 你常用站資料（經緯度從 Google Maps / data.gov.hk 估計）
     const stops = {
-      "Yip Yee Mansion": { lat: 22.255, lng: 114.155, name: "業漁大廈 (近 Aberdeen Main Rd)" },  // Aberdeen 近田灣 [web:46][web:50]
-      "Healthy Village": { lat: 22.290, lng: 114.210, name: "健康村 (King's Rd, North Point)" }  // 北角 [web:51][web:58]
+      "Yip Yee Mansion": { lat: 22.255, lng: 114.155, name: "業漁大廈 (Aberdeen)" },
+      "Healthy Village": { lat: 22.290, lng: 114.210, name: "健康村 (North Point)" }
     };
 
-    // 每條路線嘅預設班次（平日高峰期，你可以改時間）
     const schedules = {
-      "38": { outbound: ["07:30", "07:45", "08:00", "18:00", "18:15"], inbound: ["08:30", "18:45"] },
-      "42": { outbound: ["07:20", "07:50", "18:10"], inbound: ["08:20", "18:40"] },
-      "77": { outbound: ["07:40", "08:10", "18:20"], inbound: ["08:00", "18:50"] },
-      "77X": { outbound: ["07:55", "18:05"], inbound: ["08:25", "19:00"] },
-      "99": { outbound: ["07:35", "08:05", "18:30"], inbound: ["08:15", "18:55"] }
+      "38": { outbound: ["07:30","07:45","08:00","18:00"], inbound: ["08:30","18:45"] },
+      "42": { outbound: ["07:20","07:50","18:10"], inbound: ["08:20","18:40"] },
+      "77": { outbound: ["07:40","08:10","18:20"], inbound: ["08:00","18:50"] },
+      "77X": { outbound: ["07:55","18:05"], inbound: ["08:25","19:00"] },
+      "99": { outbound: ["07:35","08:05","18:30"], inbound: ["08:15","18:55"] },
+      "98": { outbound: ["07:25","07:55","17:55","18:25"], inbound: ["08:10","18:40"] },
+      "94A": { outbound: ["07:15","07:45","18:00"], inbound: ["07:30","18:15"] },
+      "91": { outbound: ["06:00","07:30","18:00"], inbound: ["08:00","18:30"] }
     };
 
     let myLat = null, myLng = null;
@@ -81,78 +87,47 @@
     const etaTableBody = document.querySelector('#etaTable tbody');
     const hintDiv = document.getElementById('hint');
 
-    // 1. 取得位置
+    function calcDistance(lat1, lng1, lat2, lng2) {
+      const R = 6371000;
+      const dLat = (lat2 - lat1) * Math.PI / 180;
+      const dLng = (lng2 - lng1) * Math.PI / 180;
+      const a = Math.sin(dLat/2)**2 + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLng/2)**2;
+      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+      return R * c;
+    }
+
     document.getElementById('getLocation').onclick = () => {
-      if (!navigator.geolocation) {
-        statusDiv.textContent = '瀏覽器唔支援定位';
-        statusDiv.className = 'status-error';
-        return;
-      }
       navigator.geolocation.getCurrentPosition(
         pos => {
           myLat = pos.coords.latitude;
           myLng = pos.coords.longitude;
-          statusDiv.textContent = `位置 OK: ${myLat.toFixed(4)}, ${myLng.toFixed(4)}`;
+          statusDiv.textContent = '✅ 位置 OK';
           statusDiv.className = 'status-ok';
         },
-        err => {
-          statusDiv.textContent = '定位失敗: ' + err.message;
-          statusDiv.className = 'status-error';
-        },
-        { enableHighAccuracy: true, timeout: 10000 }
+        err => { statusDiv.textContent = '❌ ' + err.message; statusDiv.className = 'status-error'; },
+        { enableHighAccuracy: true }
       );
     };
 
-    // 2. 搵最近站 + 距離（用簡化 Haversine 公式）
-    function calcDistance(lat1, lng1, lat2, lng2) {
-      const R = 6371000; // 地球半徑米
-      const dLat = (lat2 - lat1) * Math.PI / 180;
-      const dLng = (lng2 - lng1) * Math.PI / 180;
-      const a = Math.sin(dLat/2) * Math.sin(dLat/2) + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLng/2) * Math.sin(dLng/2);
-      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-      return R * c; // 米
-    }
-
     document.getElementById('findNearest').onclick = () => {
-      if (!myLat || !myLng) return statusDiv.textContent = '先點『取得位置』';
-      
-      const route = document.getElementById('route').value;
-      const dir = document.getElementById('direction').value;
-      
+      if (!myLat) return statusDiv.textContent = '先點『取得位置』';
       let nearest = null, minDist = Infinity;
       for (const [name, coords] of Object.entries(stops)) {
         const dist = calcDistance(myLat, myLng, coords.lat, coords.lng);
-        if (dist < minDist) {
-          minDist = dist;
-          nearest = { ...coords, dist: Math.round(dist), name };
-        }
+        if (dist < minDist) { minDist = dist; nearest = { ...coords, dist: Math.round(dist), name }; }
       }
-      
-      if (nearest) {
-        nearestDiv.innerHTML = `${nearest.name}<br><span class="distance">距離 ${nearest.dist}m</span>`;
-      }
+      nearestDiv.innerHTML = `${nearest.name}<br><span class="distance">距離 ${nearest.dist}m</span>`;
     };
 
-    // 3. 顯示班次（暫時用固定，之後可換 Citybus API）
     document.getElementById('getETA').onclick = () => {
-      if (!myLat) return statusDiv.textContent = '先取得位置';
-      
       const route = document.getElementById('route').value;
       const dir = document.getElementById('direction').value;
-      const times = schedules[route][dir] || [];
-      
-      etaTableBody.innerHTML = '';
-      times.forEach(time => {
-        const tr = document.createElement('tr');
-        tr.innerHTML = `<td class="eta">${time}</td>`;
-        etaTableBody.appendChild(tr);
-      });
-      
-      hintDiv.innerHTML = `呢啲係 ${route} ${dir === 'outbound' ? '去市區' : '去筲箕灣'} 嘅平日高峰班次。<br>想實時？可以加 Citybus API: <a href="https://data.gov.hk/en-data/dataset/ctb-eta-transport-realtime-eta" target="_blank">data.gov.hk</a>`;
+      const times = schedules[route]?.[dir] || [];
+      etaTableBody.innerHTML = times.map(t => `<tr><td class="eta">${t}</td></tr>`).join('');
+      hintDiv.innerHTML = '平日高峰預設班次。實時資料：data.gov.hk Citybus API';
     };
 
-    // 自動取得位置
-    if (navigator.geolocation) navigator.geolocation.getCurrentPosition(p => { myLat = p.coords.latitude; myLng = p.coords.longitude; });
+    navigator.geolocation.getCurrentPosition(p => { myLat = p.coords.latitude; myLng = p.coords.longitude; });
   </script>
 </body>
 </html>
