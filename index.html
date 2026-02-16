@@ -1,97 +1,246 @@
-/**
- * ATO Strategic Extraction Tool - FINAL REVISION
- * 1. Restricts output to 23 specific whitelisted columns.
- * 2. Validates Column: Row 8 must match Row 9 (and not be #N/A).
- * 3. Categorizes Rows by Column AB status (OK/INI vs. OUT).
- * 4. Preserves Row 9 as the master header.
- */
-function extractATOData() {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sourceSheet = ss.getSheetByName("20260216ATO");
-  
-  if (!sourceSheet) {
-    Browser.msgBox("Source sheet '20260216ATO' not found.");
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Simple HK Bus Tracker</title>
+  <style>
+    body {
+      font-family: system-ui, sans-serif;
+      max-width: 640px;
+      margin: 0 auto;
+      padding: 16px;
+      background: #f8f9fa;
+    }
+    h1 { text-align: center; color: #1a3c6d; }
+    select, button {
+      padding: 12px;
+      font-size: 1.1rem;
+      margin: 8px 0;
+      width: 100%;
+      border-radius: 8px;
+      border: 1px solid #ccc;
+    }
+    button {
+      background: #1a3c6d;
+      color: white;
+      border: none;
+      font-weight: bold;
+      cursor: pointer;
+    }
+    button:hover { background: #2c5aa4; }
+    #result {
+      margin-top: 24px;
+      padding: 16px;
+      background: white;
+      border-radius: 12px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+      min-height: 100px;
+    }
+    .stop {
+      margin: 16px 0;
+      padding-bottom: 12px;
+      border-bottom: 1px solid #eee;
+    }
+    .eta {
+      font-size: 1.4rem;
+      font-weight: bold;
+      color: #d32f2f;
+    }
+    .small { color: #555; font-size: 0.95rem; }
+    .error { color: #c62828; }
+    .loading::after {
+      content: " ⏳";
+      animation: spin 2s linear infinite;
+    }
+    @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+
+<h1>HK Bus Tracker (Tung Chung Area)</h1>
+
+<label for="route">1. Select Bus Route:</label>
+<select id="route">
+  <option value="">--- Choose route ---</option>
+  <option value="S52">S52 (Airport → Tung Chung)</option>
+  <option value="37">37 (Tung Chung → Cyberport)</option>
+  <option value="38">38 (Chi Ma Wan → Tung Chung)</option>
+  <option value="3M">3M (Tung Chung → HK Station)</option>
+  <!-- Add more popular routes here -->
+</select>
+
+<label for="dir">2. Select Direction:</label>
+<select id="dir">
+  <option value="">--- Choose direction ---</option>
+  <option value="O">Outbound (去程)</option>
+  <option value="I">Inbound (回程)</option>
+</select>
+
+<button onclick="findNearestAndShowETA()">Show nearest stop + ETAs</button>
+
+<div id="result"></div>
+
+<script>
+// ───────────────────────────────────────────────
+//   IMPORTANT: This uses public open API — no key needed
+//   Base: https://rt.data.gov.hk/v2/transport/citybus/
+// ───────────────────────────────────────────────
+
+const API_BASE = "https://rt.data.gov.hk/v2/transport/citybus/";
+
+// Cache stops & routes if you want better performance later
+let allStops = null;
+
+async function loadStopsIfNeeded() {
+  if (allStops) return;
+  try {
+    const res = await fetch(`${API_BASE}stop`);
+    const json = await res.json();
+    if (json.type === "STOP" && json.data) {
+      allStops = json.data;
+    }
+  } catch (e) {
+    console.error("Cannot load stops", e);
+  }
+}
+
+async function getStopsForRoute(route, dir) {
+  try {
+    const res = await fetch(`${API_BASE}route-stop/CTB/${route}/${dir}`);
+    const json = await res.json();
+    if (json.type === "ROUTE-STOP" && json.data) {
+      return json.data; // array of { stop: "001234", seq: 1, ... }
+    }
+    return [];
+  } catch (e) {
+    console.error(e);
+    return [];
+  }
+}
+
+function getDistance(lat1, lon1, lat2, lon2) {
+  const R = 6371e3; // metres
+  const φ1 = lat1 * Math.PI/180;
+  const φ2 = lat2 * Math.PI/180;
+  const Δφ = (lat2-lat1) * Math.PI/180;
+  const Δλ = (lon2-lon1) * Math.PI/180;
+
+  const a = Math.sin(Δφ/2) * Math.sin(Δφ/2) +
+            Math.cos(φ1) * Math.cos(φ2) *
+            Math.sin(Δλ/2) * Math.sin(Δλ/2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+
+  return R * c; // in metres
+}
+
+async function findNearestAndShowETA() {
+  const route = document.getElementById("route").value.trim();
+  const dir   = document.getElementById("dir").value;
+
+  if (!route || !dir) {
+    document.getElementById("result").innerHTML = '<p class="error">Please select both route and direction.</p>';
     return;
   }
 
-  // 23 Strict Whitelisted Columns
-  var allowedColumns = [
-    "Supplier code", "Supplier name", "Sourcing Office", "Merchandise Structure",
-    "Site code", "Site name", "Address 1", "Address 2", "Address 3", "Province", 
-    "Country", "Created On", "Site Comment", "Site status", "Audit type code", 
-    "Audit company", "Score", "Overall rate", "Audit real date", 
-    "Quality team comment", "Audit status", "End of validity date", "Alerte"
-  ];
+  const resultDiv = document.getElementById("result");
+  resultDiv.innerHTML = '<p class="loading">Loading stops & location...</p>';
 
-  var targetName1 = "ATO_OK_INI";
-  var targetName2 = "ATO_OUT";
+  // Step 1: Get user's location
+  let userLat, userLon;
+  try {
+    const pos = await new Promise((resolve, reject) => {
+      navigator.geolocation.getCurrentPosition(resolve, reject, { enableHighAccuracy: true, timeout: 8000 });
+    });
+    userLat = pos.coords.latitude;
+    userLon = pos.coords.longitude;
+  } catch (err) {
+    resultDiv.innerHTML = '<p class="error">Cannot get location. Please allow location access.<br>' + err.message + '</p>';
+    return;
+  }
 
-  var sheet1 = getOrCreateSheet(ss, targetName1);
-  var sheet2 = getOrCreateSheet(ss, targetName2);
+  // Step 2: Load all stops if needed (optional optimization)
+  await loadStopsIfNeeded();
 
-  var values = sourceSheet.getDataRange().getValues();
-  var row8 = values[7]; // Status Validation Row
-  var row9 = values[8]; // Header Row
-  var colABIndex = 27;  // Original index for Column AB
+  // Step 3: Get stops for this route + direction
+  const routeStops = await getStopsForRoute(route, dir);
+  if (routeStops.length === 0) {
+    resultDiv.innerHTML = '<p class="error">No stops found for this route/direction.</p>';
+    return;
+  }
 
-  // Identify valid column indices based on Whitelist + Row 8/9 Matching
-  var validColIndices = [];
-  var finalHeader = [];
+  // Step 4: Find nearest stop
+  let nearest = null;
+  let minDist = Infinity;
 
-  for (var col = 0; col < row9.length; col++) {
-    var colName = row9[col].toString().trim();
-    // Keep column if: in whitelist AND Row 8 matches Row 9 AND Row 8 isn't #N/A
-    if (allowedColumns.indexOf(colName) > -1 && row8[col] === row9[col] && row8[col] !== "#N/A") {
-      validColIndices.push(col);
-      finalHeader.push(colName);
+  for (const rs of routeStops) {
+    if (!allStops) continue; // fallback — skip distance if no allStops
+    const stopInfo = allStops.find(s => s.stop === rs.stop);
+    if (!stopInfo) continue;
+
+    const dist = getDistance(userLat, userLon, stopInfo.lat, stopInfo.long);
+    if (dist < minDist) {
+      minDist = dist;
+      nearest = { ...rs, ...stopInfo, distance: dist };
     }
   }
 
-  var resultOkIni = [finalHeader]; 
-  var resultOut = [finalHeader];   
+  if (!nearest && allStops) {
+    resultDiv.innerHTML = '<p class="error">Could not match nearest stop (data issue).</p>';
+    return;
+  }
 
-  // Process data rows starting from Row 10 (Index 9)
-  for (var i = 9; i < values.length; i++) {
-    var currentRow = values[i];
-    
-    // Check original Column AB status for categorization
-    var statusAB = currentRow[colABIndex] ? currentRow[colABIndex].toString().toUpperCase() : "";
-    
-    var filteredRow = [];
-    for (var j = 0; j < validColIndices.length; j++) {
-      filteredRow.push(currentRow[validColIndices[j]]);
+  // If we don't have coordinates, just show first stop as fallback
+  if (!nearest) {
+    nearest = { stop: routeStops[0].stop, name_tc: "Unknown (first stop)" };
+  }
+
+  resultDiv.innerHTML = `
+    <h3>Nearest stop: ${nearest.name_tc || nearest.name_en || "—"}</h3>
+    ${nearest.distance ? `<p class="small">≈ ${(nearest.distance/1000).toFixed(2)} km away</p>` : ""}
+    <p class="small">Stop ID: ${nearest.stop} • Seq: ${nearest.seq}</p>
+    <div class="loading">Fetching real-time ETAs...</div>
+  `;
+
+  // Step 5: Get ETA for this stop + route
+  try {
+    const etaRes = await fetch(`${API_BASE}eta/CTB/${nearest.stop}/${route}`);
+    const etaJson = await etaRes.json();
+
+    if (etaJson.type === "ETA" && etaJson.data && etaJson.data.length > 0) {
+      let html = "";
+      const relevant = etaJson.data.filter(e => e.dir === dir);
+
+      if (relevant.length === 0) {
+        html = "<p>No upcoming buses in this direction right now.</p>";
+      } else {
+        relevant.forEach(e => {
+          const etaTime = e.eta ? new Date(e.eta) : null;
+          const mins = etaTime ? Math.round((etaTime - Date.now()) / 60000) : null;
+          const rmk = e.rmk_tc || e.rmk_en || "";
+
+          html += `
+            <div class="stop">
+              <div class="eta">
+                ${mins !== null ? (mins <= 0 ? "Arriving" : mins + " min") : "—"}
+              </div>
+              <div>${e.dest_tc || e.dest_en || "?"}</div>
+              ${rmk ? `<div class="small">${rmk}</div>` : ""}
+              <div class="small">${etaTime ? etaTime.toLocaleTimeString("en-HK") : ""}</div>
+            </div>
+          `;
+        });
+      }
+
+      resultDiv.innerHTML = resultDiv.innerHTML.replace('<div class="loading">Fetching real-time ETAs...</div>', html);
+    } else {
+      resultDiv.innerHTML += '<p class="error">No ETA data available now.</p>';
     }
-
-    if (statusAB === "OK" || statusAB === "INI") {
-      resultOkIni.push(filteredRow);
-    } else if (statusAB === "OUT") {
-      resultOut.push(filteredRow);
-    }
-  }
-
-  // Final Output and Formatting
-  writeToSheet(sheet1, resultOkIni);
-  writeToSheet(sheet2, resultOut);
-
-  Browser.msgBox("Tower Control Sync Complete! Whitelisted columns extracted.");
-}
-
-function getOrCreateSheet(ss, name) {
-  var sheet = ss.getSheetByName(name);
-  if (!sheet) {
-    sheet = ss.insertSheet(name);
-  } else {
-    sheet.clear();
-  }
-  return sheet;
-}
-
-function writeToSheet(sheet, data) {
-  if (data.length > 1) {
-    sheet.getRange(1, 1, data.length, data[0].length).setValues(data);
-    sheet.getRange(1, 1, 1, data[0].length)
-         .setBackground("#cfe2f3")
-         .setFontWeight("bold")
-         .setBorder(true, true, true, true, true, true);
+  } catch (err) {
+    resultDiv.innerHTML += '<p class="error">ETA fetch failed: ' + err.message + '</p>';
   }
 }
+</script>
+
+</body>
+</html>
