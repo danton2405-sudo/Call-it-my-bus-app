@@ -44,7 +44,6 @@
     </select>
     
     <label>方向</label>
-    <!-- 改成方向 1 / 方向 2 -->
     <select id="direction">
       <option value="dir1">方向 1</option>
       <option value="dir2">方向 2</option>
@@ -66,14 +65,13 @@
   </div>
 
   <script>
-    // 你兩個常用站
+    // 兩個常用站（大概座標）
     const stops = {
       "Yip Yee Mansion": { lat: 22.255, lng: 114.155, name: "業漁大廈 (Aberdeen)" },
       "Healthy Village": { lat: 22.290, lng: 114.210, name: "健康村 (North Point)" }
     };
 
-    // 每條路線「方向 1 / 方向 2」實際意思
-    // dir1 = 你表列的「方向 1（預設）」，dir2 = 方向 2
+    // 各路線 方向 1 / 方向 2 的實際意義
     const routeDirections = {
       "77": {
         dir1Label: "Tin Wan → Shau Kei Wan（田灣 → 筲箕灣）",
@@ -97,109 +95,4 @@
       },
       "91": {
         dir1Label: "Central → Ap Lei Chau（中環 → 鴨脷洲）",
-        dir2Label: "Ap Lei Chau → Central（鴨脷洲 → 中環）"
-      },
-      // 38 / 42 簡單處理
-      "38": {
-        dir1Label: "North Point → Chi Fu",
-        dir2Label: "Chi Fu → North Point"
-      },
-      "42": {
-        dir1Label: "North Point → Ap Lei Chau",
-        dir2Label: "Ap Lei Chau → North Point"
-      }
-    };
-
-    // 固定時間仍然用 dir1/dir2 key（相等於原本 outbound/inbound）
-    const schedules = {
-      "38": { dir1: ["07:30","07:45","08:00","18:00"], dir2: ["08:30","18:45"] },
-      "42": { dir1: ["07:20","07:50","18:10"], dir2: ["08:20","18:40"] },
-      "77": { dir1: ["07:40","08:10","18:20"], dir2: ["08:00","18:50"] },
-      "77X": { dir1: ["07:55","18:05"], dir2: ["08:25","19:00"] },
-      "99": { dir1: ["07:35","08:05","18:30"], dir2: ["08:15","18:55"] },
-      "98": { dir1: ["07:25","07:55","17:55","18:25"], dir2: ["08:10","18:40"] },
-      "94A": { dir1: ["07:15","07:45","18:00"], dir2: ["07:30","18:15"] },
-      "91": { dir1: ["06:00","07:30","18:00"], dir2: ["08:00","18:30"] }
-    };
-
-    let myLat = null, myLng = null;
-    const statusDiv = document.getElementById('locationStatus');
-    const nearestDiv = document.getElementById('nearestStop');
-    const etaTableBody = document.querySelector('#etaTable tbody');
-    const hintDiv = document.getElementById('hint');
-    const routeSelect = document.getElementById('route');
-    const directionSelect = document.getElementById('direction');
-
-    // 當你轉路線時，更新方向文字
-    function updateDirectionLabels() {
-      const r = routeSelect.value;
-      const config = routeDirections[r];
-      if (!config) return;
-      directionSelect.options[0].textContent = "方向 1 - " + config.dir1Label;
-      directionSelect.options[1].textContent = "方向 2 - " + config.dir2Label;
-    }
-    updateDirectionLabels();
-    routeSelect.addEventListener('change', updateDirectionLabels);
-
-    function calcDistance(lat1, lng1, lat2, lng2) {
-      const R = 6371000;
-      const dLat = (lat2 - lat1) * Math.PI / 180;
-      const dLng = (lng2 - lng1) * Math.PI / 180;
-      const a = Math.sin(dLat/2)**2 + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLng/2)**2;
-      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-      return R * c;
-    }
-
-    document.getElementById('getLocation').onclick = () => {
-      navigator.geolocation.getCurrentPosition(
-        pos => {
-          myLat = pos.coords.latitude;
-          myLng = pos.coords.longitude;
-          statusDiv.textContent = '✅ 位置 OK';
-          statusDiv.className = 'status-ok';
-        },
-        err => {
-          statusDiv.textContent = '❌ ' + err.message;
-          statusDiv.className = 'status-error';
-        },
-        { enableHighAccuracy: true }
-      );
-    };
-
-    document.getElementById('findNearest').onclick = () => {
-      if (!myLat) {
-        statusDiv.textContent = '先點「取得位置」';
-        statusDiv.className = 'status-error';
-        return;
-      }
-      let nearest = null, minDist = Infinity;
-      for (const [name, coords] of Object.entries(stops)) {
-        const dist = calcDistance(myLat, myLng, coords.lat, coords.lng);
-        if (dist < minDist) {
-          minDist = dist;
-          nearest = { ...coords, dist: Math.round(dist), name };
-        }
-      }
-      nearestDiv.innerHTML = `${nearest.name}<br><span class="distance">距離 ${nearest.dist}m</span>`;
-    };
-
-    document.getElementById('getETA').onclick = () => {
-      const route = routeSelect.value;
-      const dir = directionSelect.value; // dir1 / dir2
-      const times = schedules[route]?.[dir] || [];
-      etaTableBody.innerHTML = times.map(t => `<tr><td class="eta">${t}</td></tr>`).join('');
-      const cfg = routeDirections[route];
-      const label = cfg ? (dir === "dir1" ? cfg.dir1Label : cfg.dir2Label) : "";
-      hintDiv.innerHTML = `路線 ${route}（${label}）平日高峰預設班次。`;
-    };
-
-    // 預先嘗試一次定位（方便）
-    if (navigator.geolocation) {
-      navigator.geolocation.getCurrentPosition(p => {
-        myLat = p.coords.latitude;
-        myLng = p.coords.longitude;
-      });
-    }
-  </script>
-</body>
-</html>
+        dir2Label: "Ap Lei Chau → Central（鴨脷洲 → 中環
