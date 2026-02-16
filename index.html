@@ -1,98 +1,102 @@
-<!DOCTYPE html>
-<html lang="zh-HK">
-<head>
-  <meta charset="UTF-8">
-  <title>Bus Tracker - Citybus 38/42/77/77X/99/98/94A/91</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <style>
-    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; max-width: 400px; margin: 0 auto; padding: 20px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); min-height: 100vh; color: #333; }
-    .card { background: white; padding: 20px; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.1); margin-bottom: 20px; }
-    h1 { text-align: center; color: white; margin-bottom: 10px; }
-    label { display: block; margin: 10px 0 5px; font-weight: 600; }
-    select, button { width: 100%; padding: 12px; margin-bottom: 10px; border: 1px solid #ddd; border-radius: 8px; font-size: 16px; box-sizing: border-box; }
-    button { background: #007AFF; color: white; border: none; font-weight: 600; cursor: pointer; }
-    button:disabled { background: #ccc; cursor: not-allowed; }
-    #locationStatus { text-align: center; padding: 10px; border-radius: 8px; margin-bottom: 10px; }
-    .status-ok { background: #d4edda; color: #155724; }
-    .status-error { background: #f8d7da; color: #721c24; }
-    #nearestStop { font-size: 18px; font-weight: bold; text-align: center; margin: 15px 0; }
-    table { width: 100%; border-collapse: collapse; margin-top: 10px; }
-    th, td { border: 1px solid #ddd; padding: 10px; text-align: center; }
-    th { background: #f8f9fa; }
-    .eta { font-size: 20px; color: #007AFF; font-weight: bold; }
-    .distance { color: #666; font-size: 14px; }
-    .routes-list { font-size: 12px; color: #888; text-align: center; margin-top: 10px; }
-  </style>
-</head>
-<body>
-  <h1>🚌 Bus Tracker</h1>
-  <div class="routes-list">Citybus: 38, 42, 77, 77X, 99, 98, 94A, 91</div>
-  
-  <div class="card">
-    <div id="locationStatus" class="status-error">未取得位置，點「取得位置」</div>
-    
-    <label>路線</label>
-    <select id="route">
-      <option value="38">38 (North Point ↔ Chi Fu)</option>
-      <option value="42">42 (North Point ↔ Ap Lei Chau)</option>
-      <option value="77">77 (Tin Wan ↔ Shau Kei Wan)</option>
-      <option value="77X">77X (Wah Kwai ↔ Sai Wan Ho)</option>
-      <option value="99">99 (Shau Kei Wan ↔ South Horizons)</option>
-      <option value="98">98 (Lei Tung ↔ Aberdeen)</option>
-      <option value="94A">94A (Wah Fu - Lei Tung Circular)</option>
-      <option value="91">91 (Central ↔ Ap Lei Chau)</option>
-    </select>
-    
-    <label>方向</label>
-    <select id="direction">
-      <option value="dir1">方向 1</option>
-      <option value="dir2">方向 2</option>
-    </select>
-    
-    <button id="getLocation">📍 取得我位置</button>
-    <button id="findNearest">🔍 搵最近巴士站</button>
-    <button id="getETA">⏰ 查班次</button>
-  </div>
+// Constants for API
+    const API_BASE = "https://rt.data.gov.hk/v1/transport/citybus";
 
-  <div class="card">
-    <h3>最近站 + 班次</h3>
-    <div id="nearestStop">揀路線 + 點「搵最近站」</div>
-    <table id="etaTable">
-      <thead><tr><th>預計到站</th></tr></thead>
-      <tbody></tbody>
-    </table>
-    <div id="hint" class="distance"></div>
-  </div>
-
-  <script>
-    // 兩個常用站（大概座標）
+    // Stop mapping: You need the specific Stop ID from Citybus to get real-time ETA
+    // These IDs are examples. You can find IDs using: /route-stop/CTB/{route}/{direction}
     const stops = {
-      "Yip Yee Mansion": { lat: 22.255, lng: 114.155, name: "業漁大廈 (Aberdeen)" },
-      "Healthy Village": { lat: 22.290, lng: 114.210, name: "健康村 (North Point)" }
+        "Yip Yee Mansion": { id: "002448", name: "業漁大廈 (Aberdeen)" },
+        "Healthy Village": { id: "001242", name: "健康村 (North Point)" }
     };
 
-    // 各路線 方向 1 / 方向 2 的實際意義
     const routeDirections = {
-      "77": {
-        dir1Label: "Tin Wan → Shau Kei Wan（田灣 → 筲箕灣）",
-        dir2Label: "Shau Kei Wan → Tin Wan（筲箕灣 → 南區）"
-      },
-      "77X": {
-        dir1Label: "Wah Kwai → Sai Wan Ho（華貴 → 西灣河）",
-        dir2Label: "Sai Wan Ho → Wah Kwai（西灣河 → 南區）"
-      },
-      "99": {
-        dir1Label: "South Horizons → Shau Kei Wan（海怡 → 筲箕灣）",
-        dir2Label: "Shau Kei Wan → South Horizons（筲箕灣 → 南區）"
-      },
-      "98": {
-        dir1Label: "Lei Tung → Aberdeen（利東 → 香港仔）",
-        dir2Label: "Aberdeen → Lei Tung（香港仔 → 利東）"
-      },
-      "94A": {
-        dir1Label: "Wah Fu → Lei Tung（華富 → 利東）",
-        dir2Label: "Lei Tung → Wah Fu（利東 → 華富）"
-      },
-      "91": {
-        dir1Label: "Central → Ap Lei Chau（中環 → 鴨脷洲）",
-        dir2Label: "Ap Lei Chau → Central（鴨脷洲 → 中環
+        "38":  { dir: "outbound", label: "North Point ↔ Chi Fu" },
+        "42":  { dir: "outbound", label: "North Point ↔ Ap Lei Chau" },
+        "77":  { dir: "outbound", label: "Tin Wan ↔ Shau Kei Wan" },
+        "77X": { dir: "outbound", label: "Wah Kwai ↔ Sai Wan Ho" },
+        "99":  { dir: "outbound", label: "South Horizons ↔ Shau Kei Wan" },
+        "98":  { dir: "outbound", label: "Lei Tung ↔ Aberdeen" },
+        "94A": { dir: "outbound", label: "Wah Fu - Lei Tung Circular" },
+        "91":  { dir: "outbound", label: "Central ↔ Ap Lei Chau" }
+    };
+
+    let myLat = null, myLng = null;
+    let selectedStopId = "002448"; // Default
+
+    // UI Elements
+    const statusDiv = document.getElementById('locationStatus');
+    const nearestDiv = document.getElementById('nearestStop');
+    const etaTableBody = document.querySelector('#etaTable tbody');
+    const hintDiv = document.getElementById('hint');
+    const routeSelect = document.getElementById('route');
+    const directionSelect = document.getElementById('direction');
+
+    // Get Location Function
+    document.getElementById('getLocation').onclick = () => {
+        navigator.geolocation.getCurrentPosition(
+            pos => {
+                myLat = pos.coords.latitude;
+                myLng = pos.coords.longitude;
+                statusDiv.textContent = '✅ 位置 OK';
+                statusDiv.className = 'status-ok';
+            },
+            err => {
+                statusDiv.textContent = '❌ 定位失敗';
+                statusDiv.className = 'status-error';
+            }
+        );
+    };
+
+    // Helper: Find Nearest Stop Name (Using your hardcoded stops for simplicity)
+    document.getElementById('findNearest').onclick = () => {
+        if (!myLat) return alert("請先取得位置");
+        // Logic to toggle between Aberdeen and North Point based on your location
+        // Aberdeen (Yip Yee) is roughly Lat 22.25, North Point (Healthy) is Lat 22.29
+        if (myLat > 22.27) {
+            selectedStopId = stops["Healthy Village"].id;
+            nearestDiv.innerHTML = stops["Healthy Village"].name;
+        } else {
+            selectedStopId = stops["Yip Yee Mansion"].id;
+            nearestDiv.innerHTML = stops["Yip Yee Mansion"].name;
+        }
+    };
+
+    // REAL-TIME API CALL
+    document.getElementById('getETA').onclick = async () => {
+        const route = routeSelect.value;
+        const dirInput = directionSelect.value; // dir1 or dir2
+        
+        // Citybus API uses 'inbound' or 'outbound'
+        const dir = (dirInput === "dir1") ? "outbound" : "inbound";
+        
+        etaTableBody.innerHTML = `<tr><td>正在更新載入...</td></tr>`;
+
+        try {
+            // URL format: /eta/CTB/{stop_id}/{route}
+            const response = await fetch(`${API_BASE}/eta/CTB/${selectedStopId}/${route}`);
+            const data = await response.json();
+
+            // Filter for the correct direction and sort by time
+            const upcoming = data.data
+                .filter(item => item.dir.toLowerCase() === dir.toLowerCase() || route === "94A") // 94A is circular
+                .sort((a, b) => new Date(a.eta) - new Date(b.eta));
+
+            if (!upcoming || upcoming.length === 0) {
+                etaTableBody.innerHTML = `<tr><td class="eta">暫無即時班次資料</td></tr>`;
+            } else {
+                etaTableBody.innerHTML = upcoming.map(item => {
+                    const etaTime = new Date(item.eta);
+                    const diffMs = etaTime - new Date();
+                    const diffMins = Math.floor(diffMs / 60000);
+                    const displayMins = diffMins <= 0 ? "即將抵達" : `${diffMins} 分鐘`;
+                    
+                    return `<tr><td class="eta">${displayMins} <br><span style="font-size:12px; color:#666">(${etaTime.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})})</span></td></tr>`;
+                }).join('');
+            }
+
+            hintDiv.innerHTML = `✅ 已更新即時數據 (${new Date().toLocaleTimeString()})`;
+            
+        } catch (error) {
+            console.error(error);
+            etaTableBody.innerHTML = `<tr><td class="status-error">API 錯誤，請稍後再試</td></tr>`;
+        }
+    };
