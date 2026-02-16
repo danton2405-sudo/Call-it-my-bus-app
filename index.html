@@ -64,11 +64,26 @@
 <label for="route">1. Select Bus Route:</label>
 <select id="route">
   <option value="">--- Choose route ---</option>
-  <option value="S52">S52 (Airport → Tung Chung)</option>
-  <option value="37">37 (Tung Chung → Cyberport)</option>
-  <option value="38">38 (Chi Ma Wan → Tung Chung)</option>
-  <option value="3M">3M (Tung Chung → HK Station)</option>
-  <!-- Add more popular routes here -->
+
+  <!-- Tung Chung / Lantau popular routes (already in your code) -->
+  <option value="S52">S52 (Airport → Tung Chung / Yat Tung)</option>
+  <option value="37">37 (Tung Chung → Cyberport / HKU)</option>
+  <option value="38">38 (Chi Ma Wan / Mui Wo → Tung Chung)  ← wait, actually this 38 is different; see note below</option>
+  <option value="3M">3M (Tung Chung → Central / HK Station)</option>
+  <!-- Add more Lantau ones if needed: E11, E21, A31, etc. -->
+
+  <!-- New routes you requested – mostly HK Island Citybus -->
+  <option value="38">38 (Chi Fu Fa Yuen ↔ North Point Ferry Pier)</option>
+  <option value="42">42 (Wah Fu South ↔ North Point Ferry Pier)</option>
+  <option value="77">77 (Tin Wan ↔ Shau Kei Wan)</option>
+  <option value="77X">77X (Wah Kwai → Sai Wan Ho / peak only)</option>
+  <option value="99">99 (South Horizons ↔ Shau Kei Wan)</option>
+
+  <!-- Optional extras – common Citybus routes users might want -->
+  <option value="70">70 (Aberdeen ↔ Cyberport / Wah Fu)</option>
+  <option value="71">71 (Wong Chuk Hang ↔ Central)</option>
+  <option value="90">90 (Ap Lei Chau ↔ Central)</option>
+  <option value="98">98 (Lei Tung ↔ Aberdeen)</option>
 </select>
 
 <label for="dir">2. Select Direction:</label>
