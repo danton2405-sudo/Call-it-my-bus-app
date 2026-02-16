@@ -6,33 +6,33 @@
     <title>HK Citybus Tracker</title>
     <style>
         body { font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; }
-        select, button { padding: 10px; margin: 5px; width: 100%; box-sizing: border-box; }
-        #results { margin-top: 20px; padding: 15px; border: 1px solid #ccc; border-radius: 5px; }
-        .eta { margin: 10px 0; padding: 10px; background: #f9f9f9; border-radius: 3px; }
-        .error { color: red; }
-        .loading { color: blue; }
+        select, button { padding: 10px; margin: 8px 0; width: 100%; box-sizing: border-box; font-size: 16px; }
+        #results { margin-top: 20px; padding: 15px; border: 1px solid #ccc; border-radius: 8px; background: #f9f9f9; }
+        .eta { margin: 12px 0; padding: 12px; background: white; border-left: 4px solid #0066cc; border-radius: 4px; }
+        .error { color: #d32f2f; font-weight: bold; }
+        .loading { color: #1976d2; }
+        label { display: block; margin: 12px 0 4px; font-weight: bold; }
+        h1 { text-align: center; color: #0066cc; }
     </style>
 </head>
 <body>
     <h1>Citybus Tracker (HK)</h1>
-    <p>Allow location access for nearest stop detection.</p>
+    <p>Allow location access for nearest stop detection. Works best on mobile.</p>
     
-    <label>Bus Route:</label>
+    <label for="routeSelect">Bus Route:</label>
     <select id="routeSelect">
         <option value="">Loading routes...</option>
     </select>
     
-    <label>Direction:</label>
+    <label for="dirSelect">Direction:</label>
     <select id="dirSelect" disabled>
         <option value="">Select route first</option>
-        <option value="outbound">Outbound (to destination)</option>
-        <option value="inbound">Inbound (to origin)</option>
     </select>
     
     <button id="trackBtn" disabled>Track Bus</button>
     <button id="refreshBtn" style="display:none;">Refresh ETA</button>
     
-    <div id="status"></div>
+    <div id="status" style="margin-top: 16px; min-height: 24px;"></div>
     <div id="results" style="display:none;"></div>
 
     <script>
@@ -43,154 +43,51 @@
         let currentRoute = '';
         let currentDir = '';
 
-        // Haversine distance (km)
+        // Haversine distance in kilometers
         function haversine(lat1, lon1, lat2, lon2) {
             const R = 6371;
             const dLat = (lat2 - lat1) * Math.PI / 180;
             const dLon = (lon2 - lon1) * Math.PI / 180;
-            const a = Math.sin(dLat/2) * Math.sin(dLat/2) + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLon/2) * Math.sin(dLon/2);
+            const a = Math.sin(dLat/2)**2 + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLon/2)**2;
             const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
             return R * c;
         }
 
-        // Format ETA to readable string
+        // Format ETA nicely
         function formatETA(etaStr) {
+            if (!etaStr) return '—';
             const now = new Date();
             const eta = new Date(etaStr);
-            const diff = eta - now;
-            if (diff < 0) return 'Past';
-            const mins = Math.round(diff / 60000);
-            return mins < 1 ? 'Now' : `${mins} mins`;
+            const diffMs = eta - now;
+            if (diffMs < 0) return 'Departed';
+            const mins = Math.round(diffMs / 60000);
+            return mins <= 1 ? 'Arriving now' : `${mins} min${mins > 1 ? 's' : ''}`;
         }
 
-        // Get user location
+        // Get user location (fallback to central HK)
         function getLocation() {
-            return new Promise((resolve, reject) => {
+            return new Promise((resolve) => {
                 if (navigator.geolocation) {
                     navigator.geolocation.getCurrentPosition(
                         pos => resolve({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
-                        () => resolve({ lat: 22.3964, lng: 114.1095 }) // HK default
+                        () => resolve({ lat: 22.2800, lng: 114.1580 }) // Central HK fallback
                     );
                 } else {
-                    reject('Geolocation not supported');
+                    resolve({ lat: 22.2800, lng: 114.1580 });
                 }
             });
         }
 
-        // Fetch routes
+        // Load all routes
         async function fetchRoutes() {
             try {
                 const res = await fetch(`${BASE_URL}route/${COMPANY}`);
                 const data = await res.json();
-                const routes = [...new Set(data.data.map(r => r.route))].sort();
-                const select = document.getElementById('routeSelect');
-                select.innerHTML = '<option value="">Select route</option>' + routes.map(r => `<option value="${r}">${r}</option>`).join('');
-                document.getElementById('status').textContent = 'Routes loaded.';
-            } catch (err) {
-                document.getElementById('status').innerHTML = `<span class="error">Failed to load routes: ${err.message}</span>`;
-            }
-        }
-
-        // Fetch stops for route/dir
-        async function fetchStops(route, direction) {
-            try {
-                const res = await fetch(`${BASE_URL}route-stop/${COMPANY}/${route}/${direction}`);
-                const data = await res.json();
-                currentStops = data.data;
-                document.getElementById('status').textContent = 'Stops loaded.';
-            } catch (err) {
-                document.getElementById('status').innerHTML = `<span class="error">Failed to load stops: ${err.message}</span>`;
-            }
-        }
-
-        // Find nearest stop
-        function findNearestStop() {
-            if (!userLocation || currentStops.length === 0) return null;
-            let nearest = null;
-            let minDist = Infinity;
-            currentStops.forEach(stop => {
-                const dist = haversine(userLocation.lat, userLocation.lng, stop.lat, stop.lng);
-                if (dist < minDist) {
-                    minDist = dist;
-                    nearest = { ...stop, dist };
-                }
-            });
-            return nearest;
-        }
-
-        // Fetch and display ETA
-        async function fetchETA(stopId, route, dir) {
-            try {
-                document.getElementById('status').innerHTML = '<span class="loading">Fetching ETA...</span>';
-                const res = await fetch(`${BASE_URL}eta/${COMPANY}/${stopId}/${route}`);
-                if (!res.ok) throw new Error(`API error: ${res.status}`);
-                const data = await res.json();
-                const dirMap = { outbound: 'O', inbound: 'I' };
-                const etas = data.data.filter(e => e.dir === dirMap[dir]).slice(0, 3);
-                if (etas.length === 0) {
-                    document.getElementById('results').innerHTML = '<p>No upcoming buses in this direction.</p>';
-                    return;
-                }
-                let html = `<p><strong>Nearest Stop:</strong> ${etas[0].stop} - ${etas[0].dest_en} (${Math.round(etas[0].dist * 1000)}m away)</p>`;
-                etas.forEach((e, i) => {
-                    const time = formatETA(e.eta);
-                    const rmk = e.rmk_en ? ` (${e.rmk_en})` : '';
-                    html += `<div class="eta"><strong>Bus ${i+1}:</strong> ${time} - To: ${e.dest_en}${rmk}</div>`;
+                if (!data.data) throw new Error('No route data');
+                const routes = [...new Set(data.data.map(r => r.route))].sort((a,b) => {
+                    return isNaN(a) || isNaN(b) ? a.localeCompare(b) : Number(a) - Number(b);
                 });
-                document.getElementById('results').innerHTML = html;
-            } catch (err) {
-                document.getElementById('status').innerHTML = `<span class="error">ETA fetch failed: ${err.message}</span>`;
-            }
-        }
-
-        // Event listeners
-        document.getElementById('routeSelect').addEventListener('change', async (e) => {
-            currentRoute = e.target.value;
-            const dirSelect = document.getElementById('dirSelect');
-            dirSelect.disabled = !currentRoute;
-            if (currentRoute) {
-                dirSelect.value = '';
-                document.getElementById('trackBtn').disabled = true;
-                document.getElementById('refreshBtn').style.display = 'none';
-                document.getElementById('results').style.display = 'none';
-            }
-        });
-
-        document.getElementById('dirSelect').addEventListener('change', async (e) => {
-            currentDir = e.target.value;
-            if (currentDir && currentRoute) {
-                await fetchStops(currentRoute, currentDir);
-                document.getElementById('trackBtn').disabled = false;
-            }
-        });
-
-        document.getElementById('trackBtn').addEventListener('click', async () => {
-            if (!userLocation) {
-                userLocation = await getLocation();
-            }
-            const nearest = findNearestStop();
-            if (!nearest) {
-                document.getElementById('status').innerHTML = '<span class="error">No stops found.</span>';
-                return;
-            }
-            await fetchETA(nearest.stop, currentRoute, currentDir);
-            document.getElementById('results').style.display = 'block';
-            document.getElementById('refreshBtn').style.display = 'inline-block';
-            document.getElementById('trackBtn').style.display = 'none';
-        });
-
-        document.getElementById('refreshBtn').addEventListener('click', () => {
-            if (currentStops.length > 0) {
-                const nearest = findNearestStop(); // Re-find in case location updated
-                fetchETA(nearest.stop, currentRoute, currentDir);
-            }
-        });
-
-        // Init
-        (async () => {
-            userLocation = await getLocation();
-            await fetchRoutes();
-        })();
-    </script>
-</body>
-</html>
+                const select = document.getElementById('routeSelect');
+                select.innerHTML = '<option value="">Select bus route</option>' + 
+                    routes.map(r => `<option value="${r}">${r}</option>`).join('');
+                document.getElementById('status').textContent = 'Routes loaded. Choose one
