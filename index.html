@@ -1,102 +1,45 @@
-// Constants for API
-    const API_BASE = "https://rt.data.gov.hk/v1/transport/citybus";
-
-    // Stop mapping: You need the specific Stop ID from Citybus to get real-time ETA
-    // These IDs are examples. You can find IDs using: /route-stop/CTB/{route}/{direction}
-    const stops = {
-        "Yip Yee Mansion": { id: "002448", name: "業漁大廈 (Aberdeen)" },
-        "Healthy Village": { id: "001242", name: "健康村 (North Point)" }
+// 1. Updated Route Config with explicit Destinations
+    const routeConfig = {
+      "38":  { out: "Chi Fu", in: "North Point" },
+      "42":  { out: "Ap Lei Chau", in: "North Point" },
+      "77":  { out: "Shau Kei Wan", in: "Tin Wan" },
+      "77X": { out: "Sai Wan Ho", in: "Wah Kwai" },
+      "99":  { out: "Shau Kei Wan", in: "South Horizons" },
+      "98":  { out: "Aberdeen", in: "Lei Tung" },
+      "94A": { out: "Circular", in: "Circular" },
+      "91":  { out: "Ap Lei Chau", in: "Central" }
     };
 
-    const routeDirections = {
-        "38":  { dir: "outbound", label: "North Point ↔ Chi Fu" },
-        "42":  { dir: "outbound", label: "North Point ↔ Ap Lei Chau" },
-        "77":  { dir: "outbound", label: "Tin Wan ↔ Shau Kei Wan" },
-        "77X": { dir: "outbound", label: "Wah Kwai ↔ Sai Wan Ho" },
-        "99":  { dir: "outbound", label: "South Horizons ↔ Shau Kei Wan" },
-        "98":  { dir: "outbound", label: "Lei Tung ↔ Aberdeen" },
-        "94A": { dir: "outbound", label: "Wah Fu - Lei Tung Circular" },
-        "91":  { dir: "outbound", label: "Central ↔ Ap Lei Chau" }
-    };
-
-    let myLat = null, myLng = null;
-    let selectedStopId = "002448"; // Default
-
-    // UI Elements
-    const statusDiv = document.getElementById('locationStatus');
-    const nearestDiv = document.getElementById('nearestStop');
-    const etaTableBody = document.querySelector('#etaTable tbody');
-    const hintDiv = document.getElementById('hint');
-    const routeSelect = document.getElementById('route');
-    const directionSelect = document.getElementById('direction');
-
-    // Get Location Function
-    document.getElementById('getLocation').onclick = () => {
-        navigator.geolocation.getCurrentPosition(
-            pos => {
-                myLat = pos.coords.latitude;
-                myLng = pos.coords.longitude;
-                statusDiv.textContent = '✅ 位置 OK';
-                statusDiv.className = 'status-ok';
-            },
-            err => {
-                statusDiv.textContent = '❌ 定位失敗';
-                statusDiv.className = 'status-error';
-            }
-        );
-    };
-
-    // Helper: Find Nearest Stop Name (Using your hardcoded stops for simplicity)
-    document.getElementById('findNearest').onclick = () => {
-        if (!myLat) return alert("請先取得位置");
-        // Logic to toggle between Aberdeen and North Point based on your location
-        // Aberdeen (Yip Yee) is roughly Lat 22.25, North Point (Healthy) is Lat 22.29
-        if (myLat > 22.27) {
-            selectedStopId = stops["Healthy Village"].id;
-            nearestDiv.innerHTML = stops["Healthy Village"].name;
-        } else {
-            selectedStopId = stops["Yip Yee Mansion"].id;
-            nearestDiv.innerHTML = stops["Yip Yee Mansion"].name;
-        }
-    };
-
-    // REAL-TIME API CALL
+    // 2. Revised ETA logic to show the Destination Name
     document.getElementById('getETA').onclick = async () => {
         const route = routeSelect.value;
-        const dirInput = directionSelect.value; // dir1 or dir2
-        
-        // Citybus API uses 'inbound' or 'outbound'
+        const dirInput = directionSelect.value; 
         const dir = (dirInput === "dir1") ? "outbound" : "inbound";
+        const destination = (dir === "outbound") ? routeConfig[route].out : routeConfig[route].in;
         
-        etaTableBody.innerHTML = `<tr><td>正在更新載入...</td></tr>`;
+        etaTableBody.innerHTML = `<tr><td>正在查詢往 ${destination} 的班次...</td></tr>`;
 
         try {
-            // URL format: /eta/CTB/{stop_id}/{route}
             const response = await fetch(`${API_BASE}/eta/CTB/${selectedStopId}/${route}`);
             const data = await response.json();
 
-            // Filter for the correct direction and sort by time
+            // Filter for the correct direction
             const upcoming = data.data
-                .filter(item => item.dir.toLowerCase() === dir.toLowerCase() || route === "94A") // 94A is circular
+                .filter(item => item.dir.toLowerCase() === dir.toLowerCase())
                 .sort((a, b) => new Date(a.eta) - new Date(b.eta));
 
             if (!upcoming || upcoming.length === 0) {
-                etaTableBody.innerHTML = `<tr><td class="eta">暫無即時班次資料</td></tr>`;
+                etaTableBody.innerHTML = `<tr><td class="eta">往 ${destination} 暫無班次</td></tr>`;
             } else {
                 etaTableBody.innerHTML = upcoming.map(item => {
                     const etaTime = new Date(item.eta);
-                    const diffMs = etaTime - new Date();
-                    const diffMins = Math.floor(diffMs / 60000);
-                    const displayMins = diffMins <= 0 ? "即將抵達" : `${diffMins} 分鐘`;
+                    const diffMins = Math.floor((etaTime - new Date()) / 60000);
+                    const display = diffMins <= 0 ? "即將抵達" : `${diffMins} 分鐘`;
                     
-                    return `<tr><td class="eta">${displayMins} <br><span style="font-size:12px; color:#666">(${etaTime.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})})</span></td></tr>`;
+                    return `<tr><td class="eta">${display}<br><small>終點站: ${destination}</small></td></tr>`;
                 }).join('');
             }
-
-            hintDiv.innerHTML = `✅ 已更新即時數據 (${new Date().toLocaleTimeString()})`;
-            
         } catch (error) {
-            console.error(error);
-            etaTableBody.innerHTML = `<tr><td class="status-error">API 錯誤，請稍後再試</td></tr>`;
+            etaTableBody.innerHTML = `<tr><td class="status-error">連線錯誤</td></tr>`;
         }
     };
