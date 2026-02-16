@@ -1,45 +1,97 @@
-// 1. Updated Route Config with explicit Destinations
-    const routeConfig = {
-      "38":  { out: "Chi Fu", in: "North Point" },
-      "42":  { out: "Ap Lei Chau", in: "North Point" },
-      "77":  { out: "Shau Kei Wan", in: "Tin Wan" },
-      "77X": { out: "Sai Wan Ho", in: "Wah Kwai" },
-      "99":  { out: "Shau Kei Wan", in: "South Horizons" },
-      "98":  { out: "Aberdeen", in: "Lei Tung" },
-      "94A": { out: "Circular", in: "Circular" },
-      "91":  { out: "Ap Lei Chau", in: "Central" }
-    };
+/**
+ * ATO Strategic Extraction Tool - FINAL REVISION
+ * 1. Restricts output to 23 specific whitelisted columns.
+ * 2. Validates Column: Row 8 must match Row 9 (and not be #N/A).
+ * 3. Categorizes Rows by Column AB status (OK/INI vs. OUT).
+ * 4. Preserves Row 9 as the master header.
+ */
+function extractATOData() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sourceSheet = ss.getSheetByName("20260216ATO");
+  
+  if (!sourceSheet) {
+    Browser.msgBox("Source sheet '20260216ATO' not found.");
+    return;
+  }
 
-    // 2. Revised ETA logic to show the Destination Name
-    document.getElementById('getETA').onclick = async () => {
-        const route = routeSelect.value;
-        const dirInput = directionSelect.value; 
-        const dir = (dirInput === "dir1") ? "outbound" : "inbound";
-        const destination = (dir === "outbound") ? routeConfig[route].out : routeConfig[route].in;
-        
-        etaTableBody.innerHTML = `<tr><td>正在查詢往 ${destination} 的班次...</td></tr>`;
+  // 23 Strict Whitelisted Columns
+  var allowedColumns = [
+    "Supplier code", "Supplier name", "Sourcing Office", "Merchandise Structure",
+    "Site code", "Site name", "Address 1", "Address 2", "Address 3", "Province", 
+    "Country", "Created On", "Site Comment", "Site status", "Audit type code", 
+    "Audit company", "Score", "Overall rate", "Audit real date", 
+    "Quality team comment", "Audit status", "End of validity date", "Alerte"
+  ];
 
-        try {
-            const response = await fetch(`${API_BASE}/eta/CTB/${selectedStopId}/${route}`);
-            const data = await response.json();
+  var targetName1 = "ATO_OK_INI";
+  var targetName2 = "ATO_OUT";
 
-            // Filter for the correct direction
-            const upcoming = data.data
-                .filter(item => item.dir.toLowerCase() === dir.toLowerCase())
-                .sort((a, b) => new Date(a.eta) - new Date(b.eta));
+  var sheet1 = getOrCreateSheet(ss, targetName1);
+  var sheet2 = getOrCreateSheet(ss, targetName2);
 
-            if (!upcoming || upcoming.length === 0) {
-                etaTableBody.innerHTML = `<tr><td class="eta">往 ${destination} 暫無班次</td></tr>`;
-            } else {
-                etaTableBody.innerHTML = upcoming.map(item => {
-                    const etaTime = new Date(item.eta);
-                    const diffMins = Math.floor((etaTime - new Date()) / 60000);
-                    const display = diffMins <= 0 ? "即將抵達" : `${diffMins} 分鐘`;
-                    
-                    return `<tr><td class="eta">${display}<br><small>終點站: ${destination}</small></td></tr>`;
-                }).join('');
-            }
-        } catch (error) {
-            etaTableBody.innerHTML = `<tr><td class="status-error">連線錯誤</td></tr>`;
-        }
-    };
+  var values = sourceSheet.getDataRange().getValues();
+  var row8 = values[7]; // Status Validation Row
+  var row9 = values[8]; // Header Row
+  var colABIndex = 27;  // Original index for Column AB
+
+  // Identify valid column indices based on Whitelist + Row 8/9 Matching
+  var validColIndices = [];
+  var finalHeader = [];
+
+  for (var col = 0; col < row9.length; col++) {
+    var colName = row9[col].toString().trim();
+    // Keep column if: in whitelist AND Row 8 matches Row 9 AND Row 8 isn't #N/A
+    if (allowedColumns.indexOf(colName) > -1 && row8[col] === row9[col] && row8[col] !== "#N/A") {
+      validColIndices.push(col);
+      finalHeader.push(colName);
+    }
+  }
+
+  var resultOkIni = [finalHeader]; 
+  var resultOut = [finalHeader];   
+
+  // Process data rows starting from Row 10 (Index 9)
+  for (var i = 9; i < values.length; i++) {
+    var currentRow = values[i];
+    
+    // Check original Column AB status for categorization
+    var statusAB = currentRow[colABIndex] ? currentRow[colABIndex].toString().toUpperCase() : "";
+    
+    var filteredRow = [];
+    for (var j = 0; j < validColIndices.length; j++) {
+      filteredRow.push(currentRow[validColIndices[j]]);
+    }
+
+    if (statusAB === "OK" || statusAB === "INI") {
+      resultOkIni.push(filteredRow);
+    } else if (statusAB === "OUT") {
+      resultOut.push(filteredRow);
+    }
+  }
+
+  // Final Output and Formatting
+  writeToSheet(sheet1, resultOkIni);
+  writeToSheet(sheet2, resultOut);
+
+  Browser.msgBox("Tower Control Sync Complete! Whitelisted columns extracted.");
+}
+
+function getOrCreateSheet(ss, name) {
+  var sheet = ss.getSheetByName(name);
+  if (!sheet) {
+    sheet = ss.insertSheet(name);
+  } else {
+    sheet.clear();
+  }
+  return sheet;
+}
+
+function writeToSheet(sheet, data) {
+  if (data.length > 1) {
+    sheet.getRange(1, 1, data.length, data[0].length).setValues(data);
+    sheet.getRange(1, 1, 1, data[0].length)
+         .setBackground("#cfe2f3")
+         .setFontWeight("bold")
+         .setBorder(true, true, true, true, true, true);
+  }
+}
