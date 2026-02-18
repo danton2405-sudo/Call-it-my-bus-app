@@ -3,91 +3,128 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>HK Citybus Tracker</title>
+    <title>Yip Yee Mansion Bus Tracker</title>
     <style>
-        body { font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; }
-        select, button { padding: 10px; margin: 8px 0; width: 100%; box-sizing: border-box; font-size: 16px; }
-        #results { margin-top: 20px; padding: 15px; border: 1px solid #ccc; border-radius: 8px; background: #f9f9f9; }
-        .eta { margin: 12px 0; padding: 12px; background: white; border-left: 4px solid #0066cc; border-radius: 4px; }
-        .error { color: #d32f2f; font-weight: bold; }
-        .loading { color: #1976d2; }
-        label { display: block; margin: 12px 0 4px; font-weight: bold; }
+        body { font-family: Arial, sans-serif; max-width: 500px; margin: 20px auto; padding: 10px; }
+        select, button { width: 100%; padding: 12px; margin: 10px 0; font-size: 16px; }
+        #status { margin: 15px 0; color: #555; min-height: 24px; }
+        #results { background: #f0f8ff; padding: 15px; border-radius: 8px; display: none; }
+        .eta-item { margin: 10px 0; padding: 10px; background: white; border-left: 4px solid #0066cc; }
+        .error { color: red; font-weight: bold; }
         h1 { text-align: center; color: #0066cc; }
     </style>
 </head>
 <body>
-    <h1>Citybus Tracker (HK)</h1>
-    <p>Allow location access for nearest stop detection. Works best on mobile.</p>
-    
-    <label for="routeSelect">Bus Route:</label>
+    <h1>Yip Yee Mansion Bus Tracker</h1>
+    <p>Real-time ETA at 業漁大廈 (Aberdeen Main Road)</p>
+
+    <label>Choose Bus Route:</label>
     <select id="routeSelect">
-        <option value="">Loading routes...</option>
+        <option value="">Select route</option>
+        <option value="37A">37A</option>
+        <option value="38">38</option>
+        <option value="48">48</option>
+        <option value="70">70</option>
+        <option value="71">71</option>
+        <option value="72">72</option>
+        <option value="76">76</option>
+        <option value="77">77</option>
+        <option value="90B">90B</option>
+        <option value="95C">95C</option>
+        <option value="98">98</option>
+        <option value="107">107</option>
+        <option value="170">170</option>
+        <option value="A10">A10</option>
+        <!-- You can add more routes that pass Yip Yee Mansion if needed -->
     </select>
-    
-    <label for="dirSelect">Direction:</label>
+
+    <label>Direction:</label>
     <select id="dirSelect" disabled>
         <option value="">Select route first</option>
+        <option value="outbound">Outbound (to destination)</option>
+        <option value="inbound">Inbound (to origin)</option>
     </select>
-    
-    <button id="trackBtn" disabled>Track Bus</button>
-    <button id="refreshBtn" style="display:none;">Refresh ETA</button>
-    
-    <div id="status" style="margin-top: 16px; min-height: 24px;"></div>
-    <div id="results" style="display:none;"></div>
+
+    <button id="trackBtn" disabled>Get ETA</button>
+
+    <div id="status"></div>
+    <div id="results"></div>
 
     <script>
         const BASE_URL = 'https://rt.data.gov.hk/v2/transport/citybus/';
         const COMPANY = 'CTB';
-        let userLocation = null;
-        let currentStops = [];
+        const TARGET_STOP_NAME = 'Yip Yee Mansion';     // English
+        const TARGET_STOP_NAME_TC = '業漁大廈';         // Traditional Chinese
+
         let currentRoute = '';
         let currentDir = '';
 
-        // Haversine distance in kilometers
-        function haversine(lat1, lon1, lat2, lon2) {
-            const R = 6371;
-            const dLat = (lat2 - lat1) * Math.PI / 180;
-            const dLon = (lon2 - lon1) * Math.PI / 180;
-            const a = Math.sin(dLat/2)**2 + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLon/2)**2;
-            const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-            return R * c;
-        }
-
-        // Format ETA nicely
+        // Format ETA time
         function formatETA(etaStr) {
             if (!etaStr) return '—';
             const now = new Date();
             const eta = new Date(etaStr);
-            const diffMs = eta - now;
-            if (diffMs < 0) return 'Departed';
-            const mins = Math.round(diffMs / 60000);
-            return mins <= 1 ? 'Arriving now' : `${mins} min${mins > 1 ? 's' : ''}`;
+            const diff = (eta - now) / 60000;
+            if (diff < 0) return 'Departed';
+            if (diff < 1) return 'Arriving';
+            return `${Math.round(diff)} min`;
         }
 
-        // Get user location (fallback to central HK)
-        function getLocation() {
-            return new Promise((resolve) => {
-                if (navigator.geolocation) {
-                    navigator.geolocation.getCurrentPosition(
-                        pos => resolve({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
-                        () => resolve({ lat: 22.2800, lng: 114.1580 }) // Central HK fallback
-                    );
-                } else {
-                    resolve({ lat: 22.2800, lng: 114.1580 });
-                }
-            });
-        }
-
-        // Load all routes
-        async function fetchRoutes() {
+        // Improved: more flexible matching + debug logs
+        async function findStopId(route, direction) {
             try {
-                const res = await fetch(`${BASE_URL}route/${COMPANY}`);
+                document.getElementById('status').textContent = 'Finding Yip Yee Mansion stop...';
+                const res = await fetch(`${BASE_URL}route-stop/${COMPANY}/${route}/${direction}`);
                 const data = await res.json();
-                if (!data.data) throw new Error('No route data');
-                const routes = [...new Set(data.data.map(r => r.route))].sort((a,b) => {
-                    return isNaN(a) || isNaN(b) ? a.localeCompare(b) : Number(a) - Number(b);
+
+                if (!data.data || data.data.length === 0) {
+                    console.log(`No stops returned for ${route} ${direction}`);
+                    return null;
+                }
+
+                // Flexible search: lowercase, partial match, key words
+                const targetEn = 'yip yee mansion'.toLowerCase();
+                const targetTc = '業漁大廈'.toLowerCase();
+
+                const stop = data.data.find(s => {
+                    const en = (s.name_en || '').toLowerCase().trim();
+                    const tc = (s.name_tc || '').toLowerCase().trim();
+                    return en.includes(targetEn) ||
+                           tc.includes(targetTc) ||
+                           en.includes('yip yee') ||
+                           tc.includes('業漁') ||
+                           en.includes('aberdeen main') && en.includes('yip');
                 });
-                const select = document.getElementById('routeSelect');
-                select.innerHTML = '<option value="">Select bus route</option>' + 
-                    routes.map(r => `<option value="${r}">${r}</option>`).join('');
-                document.getElementById('status').textContent = 'Routes loaded. Choose one
+
+                if (stop) {
+                    console.log('Found stop:', {
+                        name_en: stop.name_en,
+                        name_tc: stop.name_tc,
+                        stop_id: stop.stop,
+                        seq: stop.seq,
+                        lat: stop.lat,
+                        lng: stop.lng
+                    });
+                    return stop.stop;
+                } else {
+                    console.log('No matching stop found. First few stops for debug:', 
+                        data.data.slice(0, 5).map(s => ({
+                            name_en: s.name_en,
+                            name_tc: s.name_tc,
+                            stop_id: s.stop
+                        }))
+                    );
+                    return null;
+                }
+            } catch (err) {
+                console.error('Error fetching stops:', err);
+                document.getElementById('status').innerHTML = `<span class="error">Network error: ${err.message}</span>`;
+                return null;
+            }
+        }
+
+        // Fetch ETA for the found stop
+        async function fetchETA(stopId, route, dir) {
+            try {
+                document.getElementById('status').innerHTML = '<span style="color:blue">Fetching real-time ETA...</span>';
+                const res = await fetch(`${BASE_URL}eta/${
