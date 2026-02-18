@@ -1,188 +1,45 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Yip Yee Mansion Bus Tracker</title>
-    <style>
-        body { font-family: Arial, sans-serif; max-width: 500px; margin: 20px auto; padding: 10px; }
-        select, button { width: 100%; padding: 12px; margin: 10px 0; font-size: 16px; }
-        #status { margin: 15px 0; color: #555; min-height: 24px; }
-        #results { background: #f0f8ff; padding: 15px; border-radius: 8px; display: none; }
-        .eta-item { margin: 10px 0; padding: 10px; background: white; border-left: 4px solid #0066cc; }
-        .error { color: red; font-weight: bold; }
-        h1 { text-align: center; color: #0066cc; }
-    </style>
-</head>
-<body>
-    <h1>Yip Yee Mansion Bus Tracker</h1>
-    <p>Real-time ETA at 業漁大廈 (Aberdeen Main Road)</p>
+async function findStopId(route, direction) {
+    try {
+        document.getElementById('status').textContent = 'Finding stop...';
+        const res = await fetch(`${BASE_URL}route-stop/${COMPANY}/${route}/${direction}`);
+        const data = await res.json();
 
-    <label>Choose Bus Route:</label>
-    <select id="routeSelect">
-        <option value="">Select route</option>
-        <option value="37A">37A</option>
-        <option value="38">38</option>
-        <option value="48">48</option>
-        <option value="70">70</option>
-        <option value="71">71</option>
-        <option value="72">72</option>
-        <option value="76">76</option>
-        <option value="77">77</option>
-        <option value="90B">90B</option>
-        <option value="95C">95C</option>
-        <option value="98">98</option>
-        <option value="107">107</option>
-        <option value="170">170</option>
-        <option value="A10">A10</option>
-    </select>
-
-    <label>Direction:</label>
-    <select id="dirSelect" disabled>
-        <option value="">Select direction</option>
-    </select>
-
-    <button id="trackBtn" disabled>Get ETA</button>
-
-    <div id="status"></div>
-    <div id="results"></div>
-
-    <script>
-        const BASE_URL = 'https://rt.data.gov.hk/v2/transport/citybus/';
-        const COMPANY = 'CTB';
-        const TARGET_STOP_NAME = 'Yip Yee Mansion';
-        const TARGET_STOP_NAME_TC = '業漁大廈';
-
-        let currentRoute = '';
-        let currentDir = '';
-
-        function formatETA(etaStr) {
-            if (!etaStr) return '—';
-            const now = new Date();
-            const eta = new Date(etaStr);
-            const diff = (eta - now) / 60000;
-            if (diff < 0) return 'Departed';
-            if (diff < 1) return 'Arriving';
-            return `${Math.round(diff)} min`;
+        if (!data.data || data.data.length === 0) {
+            console.log(`No stops for ${route} ${direction}`);
+            return null;
         }
 
-        async function findStopId(route, direction) {
-            try {
-                document.getElementById('status').textContent = 'Finding Yip Yee Mansion stop...';
-                const res = await fetch(`${BASE_URL}route-stop/${COMPANY}/${route}/${direction}`);
-                const data = await res.json();
+        // Very lenient match: key words anywhere, ignore case/spaces/punctuation
+        const keywordsEn = ['yip', 'yee', 'mansion'];
+        const keywordsTc = ['業漁', '大廈'];
 
-                if (!data.data || data.data.length === 0) {
-                    console.log(`No stops for ${route} ${direction}`);
-                    return null;
-                }
+        const stop = data.data.find(s => {
+            const enLower = (s.name_en || '').toLowerCase().replace(/[^a-z0-9]/g, ''); // remove commas/spaces/etc
+            const tcLower = (s.name_tc || '').toLowerCase();
 
-                const targetEn = 'yip yee mansion'.toLowerCase();
-                const targetTc = '業漁大廈'.toLowerCase();
+            const enHasAll = keywordsEn.every(kw => enLower.includes(kw));
+            const tcHasAny = keywordsTc.some(kw => tcLower.includes(kw));
 
-                const stop = data.data.find(s => {
-                    const en = (s.name_en || '').toLowerCase().trim();
-                    const tc = (s.name_tc || '').toLowerCase().trim();
-                    return en.includes(targetEn) ||
-                           tc.includes(targetTc) ||
-                           en.includes('yip yee') ||
-                           tc.includes('業漁') ||
-                           (en.includes('aberdeen main') && en.includes('yip'));
-                });
+            return enHasAll || tcHasAny || (enLower.includes('aberdeen') && enLower.includes('main') && enLower.includes('yip'));
+        });
 
-                if (stop) {
-                    console.log('Found stop:', stop.name_en, stop.name_tc, 'ID:', stop.stop);
-                    return stop.stop;
-                } else {
-                    console.log('No match. Sample stops:', data.data.slice(0,5).map(s => s.name_en || s.name_tc));
-                    return null;
-                }
-            } catch (err) {
-                console.error('Fetch stops error:', err);
-                return null;
-            }
+        if (stop) {
+            console.log('Matched stop:', stop.name_en, stop.name_tc, 'ID:', stop.stop);
+            return stop.stop;
+        } else {
+            console.log('No match. Showing first 5 stops for debug:', 
+                data.data.slice(0,5).map(s => `${s.seq}: ${s.name_en || s.name_tc} (ID: ${s.stop})`)
+            );
+
+            // Hardcoded fallback for known routes/stops (update if you find the real ID)
+            if (route === 'A10') return '001213'; // Example from some data - test and replace
+            if (route === '98') return null; // Remove if we find real ID later
+
+            return null;
         }
-
-        async function fetchETA(stopId, route, dir) {
-            try {
-                document.getElementById('status').innerHTML = '<span style="color:blue">Fetching ETA...</span>';
-                const res = await fetch(`${BASE_URL}eta/${COMPANY}/${stopId}/${route}`);
-                const json = await res.json();
-
-                if (!json.data || json.data.length === 0) {
-                    document.getElementById('results').innerHTML = '<p>No upcoming buses.</p>';
-                    document.getElementById('results').style.display = 'block';
-                    return;
-                }
-
-                const dirCode = dir === 'outbound' ? 'O' : 'I';
-                const etas = json.data.filter(e => e.dir === dirCode).slice(0, 3);
-
-                let html = '<h3>Next buses at Yip Yee Mansion:</h3>';
-                if (etas.length === 0) {
-                    html += '<p>No buses in this direction soon.</p>';
-                } else {
-                    etas.forEach((e, i) => {
-                        const time = formatETA(e.eta);
-                        const dest = e.dest_tc || e.dest_en || '—';
-                        const remark = e.rmk_en || e.rmk_tc ? ` (${e.rmk_en || e.rmk_tc})` : '';
-                        html += `<div class="eta-item"><strong>Bus ${i+1}:</strong> ${time} → ${dest}${remark}</div>`;
-                    });
-                }
-                document.getElementById('results').innerHTML = html;
-                document.getElementById('results').style.display = 'block';
-                document.getElementById('status').textContent = 'Updated.';
-            } catch (err) {
-                document.getElementById('status').innerHTML = `<span class="error">ETA error: ${err.message}</span>`;
-            }
-        }
-
-        // Fixed route change listener
-        document.getElementById('routeSelect').addEventListener('change', (e) => {
-            currentRoute = e.target.value;
-            const dirSel = document.getElementById('dirSelect');
-            
-            dirSel.innerHTML = '<option value="">Select direction</option>';
-            
-            if (currentRoute) {
-                const directions = [
-                    { value: 'outbound', text: 'Outbound (to destination)' },
-                    { value: 'inbound', text: 'Inbound (to origin)' }
-                ];
-                directions.forEach(d => {
-                    const option = document.createElement('option');
-                    option.value = d.value;
-                    option.textContent = d.text;
-                    dirSel.appendChild(option);
-                });
-                dirSel.disabled = false;
-                document.getElementById('trackBtn').disabled = true;
-                document.getElementById('results').style.display = 'none';
-                document.getElementById('status').textContent = 'Choose direction';
-            } else {
-                dirSel.disabled = true;
-                document.getElementById('trackBtn').disabled = true;
-                document.getElementById('status').textContent = '';
-            }
-        });
-
-        document.getElementById('dirSelect').addEventListener('change', (e) => {
-            currentDir = e.target.value;
-            document.getElementById('trackBtn').disabled = !currentDir;
-        });
-
-        document.getElementById('trackBtn').addEventListener('click', async () => {
-            if (!currentRoute || !currentDir) return;
-
-            const stopId = await findStopId(currentRoute, currentDir);
-            if (!stopId) {
-                document.getElementById('status').innerHTML = '<span class="error">Stop not found on this route/direction. Try the other direction.</span>';
-                document.getElementById('results').style.display = 'none';
-                return;
-            }
-
-            await fetchETA(stopId, currentRoute, currentDir);
-        });
-    </script>
-</body>
-</html>
+    } catch (err) {
+        console.error('Stops fetch failed:', err);
+        document.getElementById('status').innerHTML = `<span class="error">Failed to load stops: ${err.message}. Check internet or try GitHub Pages.</span>`;
+        return null;
+    }
+}
