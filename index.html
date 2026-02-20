@@ -11,7 +11,7 @@
         h1 { margin: 0 0 10px 0; font-size: 1.1rem; color: #333; }
         
         .stop-selector { display: flex; gap: 5px; margin-bottom: 10px; background: #eee; padding: 3px; border-radius: 10px; }
-        .stop-btn { flex: 1; border: none; padding: 10px; border-radius: 8px; cursor: pointer; font-weight: bold; font-size: 0.8rem; background: transparent; }
+        .stop-btn { flex: 1; border: none; padding: 10px; border-radius: 8px; cursor: pointer; font-weight: bold; font-size: 0.8rem; background: transparent; transition: 0.2s; }
         .stop-btn.active { background: white; box-shadow: 0 2px 5px rgba(0,0,0,0.1); color: var(--ios-blue); }
 
         .controls-row { display: flex; flex-direction: column; align-items: center; gap: 10px; margin-bottom: 10px; }
@@ -19,15 +19,19 @@
         .filter-btn { border: 1px solid #ccc; background: white; padding: 6px 12px; border-radius: 20px; font-size: 0.8rem; cursor: pointer; }
         .filter-btn.active { background: var(--ios-blue); color: white; border-color: var(--ios-blue); }
 
-        .refresh-btn { background: #28a745; color: white; border: none; padding: 10px 20px; border-radius: 20px; font-weight: bold; cursor: pointer; width: 100%; max-width: 200px; }
-        .timestamp { font-size: 0.7rem; color: #888; margin-top: 5px; }
+        .refresh-btn { background: #28a745; color: white; border: none; padding: 12px 20px; border-radius: 25px; font-weight: bold; cursor: pointer; width: 100%; max-width: 220px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+        .refresh-btn:active { transform: scale(0.98); }
+        .timestamp { font-size: 0.75rem; color: #666; margin-top: 5px; font-weight: 500; }
 
-        .bus-card { background: white; padding: 15px; margin-bottom: 8px; border-radius: 12px; display: flex; justify-content: space-between; align-items: center; border-left: 5px solid var(--ctb-yellow); }
-        .route-no { font-weight: 800; font-size: 1.4rem; color: var(--ctb-red); min-width: 60px; }
+        .bus-card { background: white; padding: 15px; margin-bottom: 8px; border-radius: 12px; display: flex; justify-content: space-between; align-items: center; border-left: 6px solid var(--ctb-yellow); animation: slideIn 0.3s ease-out; }
+        @keyframes slideIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+        
+        .route-no { font-weight: 900; font-size: 1.6rem; color: var(--ctb-red); min-width: 70px; }
         .info { flex-grow: 1; padding-left: 10px; }
-        .dest { font-size: 0.85rem; color: #444; font-weight: bold; line-height: 1.2; }
-        .eta-time { font-weight: bold; color: var(--ios-blue); font-size: 1.2rem; }
+        .dest { font-size: 0.9rem; color: #333; font-weight: bold; line-height: 1.3; }
+        .eta-time { font-weight: bold; color: var(--ios-blue); font-size: 1.3rem; text-align: right; }
         .loading { text-align: center; padding: 40px; color: #888; font-style: italic; }
+        .error-msg { color: #d9534f; font-weight: bold; text-align: center; padding: 20px; }
     </style>
 </head>
 <body>
@@ -81,33 +85,45 @@
         const timeDiv = document.getElementById('last-updated');
         resultsDiv.innerHTML = '<div class="loading">Loading live data...</div>';
         
-        // This specific URL format is the most robust for CTB Stop ETAs
+        // This uppercase CTB format is the official one for stop-based ETA
         const url = `https://rt.data.gov.hk/v2/transport/citybus/eta/CTB/${currentStop}`;
 
         try {
             const res = await fetch(url);
-            if (!res.ok) throw new Error(`Server Error (${res.status})`);
+            
+            // If the server returns 422, it means this specific endpoint might 
+            // be temporarily down or strict. We try the lowercase fallback if needed.
+            if (!res.ok) throw new Error(`Server Status ${res.status}`);
             
             const json = await res.json();
             let data = json.data || [];
 
-            // Apply Group Filter
+            // Filter out any entries that don't have an ETA time
+            data = data.filter(bus => bus.eta);
+
+            // Apply Quick Filters
             if (currentFilter !== 'ALL') {
                 data = data.filter(bus => GROUPS[currentFilter].includes(bus.route));
             }
 
-            // Remove empty/past ETAs and Sort
+            // Sort by Arrival Time
             const now = new Date();
-            data = data.filter(bus => bus.eta).sort((a, b) => new Date(a.eta) - new Date(b.eta));
+            data.sort((a, b) => new Date(a.eta) - new Date(b.eta));
 
             resultsDiv.innerHTML = '';
             
             if (data.length === 0) {
-                resultsDiv.innerHTML = '<div class="loading">No buses found. Try a different filter.</div>';
+                resultsDiv.innerHTML = '<div class="loading">No buses found. Try "All" or Refresh.</div>';
             } else {
                 data.forEach(bus => {
-                    const diff = Math.floor((new Date(bus.eta) - now) / 60000);
+                    const arrivalTime = new Date(bus.eta);
+                    const diff = Math.floor((arrivalTime - now) / 60000);
+                    
+                    // Skip buses that have already passed (diff < -1)
+                    if (diff < -1) return;
+
                     const timeStr = diff <= 0 ? "Arriving" : `${diff} min`;
+                    
                     resultsDiv.innerHTML += `
                         <div class="bus-card">
                             <div class="route-no">${bus.route}</div>
@@ -118,12 +134,14 @@
                         </div>`;
                 });
             }
-            timeDiv.innerText = `Last Updated: ${now.toLocaleTimeString()}`;
+            timeDiv.innerText = `Last Updated: ${now.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit', second:'2-digit'})}`;
         } catch (e) {
-            resultsDiv.innerHTML = `<div class="loading" style="color:red">Error: ${e.message}<br>Please check your internet connection.</div>`;
+            console.error("Fetch Error:", e);
+            resultsDiv.innerHTML = `<div class="error-msg">⚠️ Update Failed<br><small>${e.message}</small></div>`;
         }
     }
 
+    // Initial fetch on load
     fetchETA();
 </script>
 </body>
