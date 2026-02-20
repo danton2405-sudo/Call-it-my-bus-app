@@ -1,59 +1,61 @@
 <!DOCTYPE html>
-<html lang="zh-HK">
+<html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <title>Yip Yee Mansion Real ETA</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <style>
-    body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; max-width: 400px; margin: 40px auto; padding: 20px; }
-    h1 { font-size: 22px; margin-bottom: 20px; }
-    label { display: block; margin: 10px 0 4px; }
-    select, button { width: 100%; padding: 12px; font-size: 16px; margin-bottom: 12px; border: 1px solid #ddd; border-radius: 6px; }
-    button { background: #007AFF; color: white; border: none; }
-    #result { margin-top: 12px; padding: 12px; background: #f0f8ff; border-radius: 6px; font-size: 16px; }
-    .eta { font-weight: 600; color: #007AFF; }
-    .error { color: red; }
-  </style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Yip Yee Mansion Bus Tracker</title>
+    <style>
+        :root { --ctb-red: #e60012; --ctb-yellow: #ffd900; --ios-blue: #007aff; }
+        body { font-family: -apple-system, sans-serif; background: #f0f2f5; margin: 0; padding: 15px; }
+        .header { background: white; padding: 15px; border-radius: 15px; box-shadow: 0 2px 10px rgba(0,0,0,0.05); margin-bottom: 15px; text-align: center; }
+        h1 { margin: 0 0 10px 0; font-size: 1.1rem; color: #333; }
+        
+        /* Stop Selector Tabs */
+        .stop-selector { display: flex; gap: 5px; margin-bottom: 15px; background: #ddd; padding: 3px; border-radius: 10px; }
+        .stop-btn { flex: 1; border: none; padding: 8px; border-radius: 8px; cursor: pointer; font-weight: bold; font-size: 0.8rem; background: transparent; transition: 0.3s; }
+        .stop-btn.active { background: white; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
+
+        /* Quick Filter Buttons */
+        .filters { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 15px; justify-content: center; }
+        .filter-btn { border: 1px solid #ccc; background: white; padding: 6px 12px; border-radius: 20px; font-size: 0.8rem; cursor: pointer; }
+        .filter-btn.active { background: var(--ios-blue); color: white; border-color: var(--ios-blue); }
+
+        /* Bus Cards */
+        .bus-card { 
+            background: white; padding: 15px; margin-bottom: 10px; 
+            border-radius: 12px; display: flex; justify-content: space-between; align-items: center;
+            border-left: 5px solid var(--ctb-yellow);
+        }
+        .route-no { font-weight: 800; font-size: 1.5rem; color: var(--ctb-red); min-width: 60px; }
+        .info { flex-grow: 1; padding-left: 10px; }
+        .dest { font-size: 0.85rem; color: #666; font-weight: 500; }
+        .eta-box { text-align: right; }
+        .eta-time { font-weight: bold; color: var(--ios-blue); font-size: 1.2rem; }
+        .loading { text-align: center; padding: 40px; color: #888; }
+    </style>
 </head>
 <body>
-  <h1>Yip Yee Mansion 業漁大廈<br>Real ETA</h1>
 
-  <label>Route</label>
-  <select id="route">
-    <option value="98/1/YPM">98 to Lei Tung (dir1)</option>
-    <option value="98/2/YPM">98 to Aberdeen (dir2)</option>
-    <!-- Add more: 38/1/YPM, 77/1/YPM etc. once you confirm IDs -->
-  </select>
+<div class="header">
+    <h1>📍 Yip Yee Mansion (業漁大廈)</h1>
+    <div class="stop-selector">
+        <button class="stop-btn active" onclick="switchStop('002159', this)">Eastbound (To CWB/Hdq)</button>
+        <button class="stop-btn" onclick="switchStop('002161', this)">Westbound (To Wah Fu/ApLeiChau)</button>
+    </div>
+    
+    <div class="filters" id="filter-container">
+        <button class="filter-btn active" onclick="setFilter('ALL', this)">All</button>
+        <button class="filter-btn" onclick="setFilter('CENTRAL', this)">Central</button>
+        <button class="filter-btn" onclick="setFilter('CWB', this)">CWB/NorthPt</button>
+        <button class="filter-btn" onclick="setFilter('KOWLOON', this)">Kowloon</button>
+    </div>
+</div>
 
-  <button onclick="getETA()">Get Real ETA</button>
-  <div id="result">Press button for live bus times.</div>
+<div id="results"></div>
 
-  <script>
-    async function getETA() {
-      const result = document.getElementById('result');
-      const sel = document.getElementById('route').value; // e.g. "98/1/YPM"
-      const [route, dir, stop] = sel.split('/');
+<script>
+    let currentStop = "002159";
+    let currentFilter = "ALL";
 
-      result.innerHTML = 'Loading...';
-      
-      try {
-        const url = `https://rt.data.gov.hk/v2/transport/citybus/eta/CTB/${route}/${dir}/${stop}`;
-        const res = await fetch(url);
-        const data = await res.json();
-
-        if (data.data.length === 0) {
-          result.innerHTML = '<span class="error">No buses scheduled now.</span>';
-          return;
-        }
-
-        let etas = data.data.map(bus => 
-          `<div>${bus.eta} (${bus.rmk_tc || 'Normal'})</div>`
-        ).join('');
-        result.innerHTML = `<div>Next buses:</div>${etas}`;
-      } catch (e) {
-        result.innerHTML = '<span class="error">API error, try again.</span>';
-      }
-    }
-  </script>
-</body>
-</html>
+    // Route Groupings
+    const GROUPS = {
