@@ -78,13 +78,16 @@
 
     // Load all HK stops once for the search feature
     async function loadStops() {
-        try {
-            const res = await fetch('https://rt.data.gov.hk/v2/transport/citybus/stop/CTB');
-            const json = await res.json();
-            allStops = json.data;
-        } catch (e) { console.error("Search engine failed to load."); }
+    try {
+        const res = await fetch('https://rt.data.gov.hk/v2/transport/citybus/stop/CTB');
+        const json = await res.json();
+        // The array is located in json.data, NOT the top-level json object
+        allStops = json.data || []; 
+        console.log("Stops loaded:", allStops.length);
+    } catch (e) { 
+        console.error("Failed to load stops list", e); 
     }
-
+}
     function handleSearch() {
         const input = document.getElementById('stop-search').value.toLowerCase();
         const resultsBox = document.getElementById('search-results');
