@@ -83,65 +83,69 @@
     async function fetchETA() {
         const resultsDiv = document.getElementById('results');
         const timeDiv = document.getElementById('last-updated');
-        resultsDiv.innerHTML = '<div class="loading">Loading live data...</div>';
-        
-        // This uppercase CTB format is the official one for stop-based ETA
-        const url = `https://rt.data.gov.hk/v2/transport/citybus/eta/CTB/${currentStop}`;
+        resultsDiv.innerHTML = '<div class="loading">Searching for buses...</div>';
 
-        try {
-            const res = await fetch(url);
-            
-            // If the server returns 422, it means this specific endpoint might 
-            // be temporarily down or strict. We try the lowercase fallback if needed.
-            if (!res.ok) throw new Error(`Server Status ${res.status}`);
-            
-            const json = await res.json();
-            let data = json.data || [];
+        // We will try these 3 variations because the Gov API is inconsistent
+        const urlsToTry = [
+            `https://rt.data.gov.hk/v2/transport/citybus/eta/CTB/${currentStop}`,
+            `https://rt.data.gov.hk/v2/transport/citybus/eta/ctb/${currentStop}`,
+            `https://rt.data.gov.hk/v2/transport/citybus/eta/NWFB/${currentStop}` 
+        ];
 
-            // Filter out any entries that don't have an ETA time
-            data = data.filter(bus => bus.eta);
+        let data = [];
+        let success = false;
 
-            // Apply Quick Filters
-            if (currentFilter !== 'ALL') {
-                data = data.filter(bus => GROUPS[currentFilter].includes(bus.route));
+        for (let url of urlsToTry) {
+            try {
+                const res = await fetch(url);
+                if (res.ok) {
+                    const json = await res.json();
+                    data = json.data || [];
+                    success = true;
+                    break; // Stop trying once we get a 200 OK
+                }
+            } catch (e) {
+                console.log(`Failed format: ${url}`);
             }
-
-            // Sort by Arrival Time
-            const now = new Date();
-            data.sort((a, b) => new Date(a.eta) - new Date(b.eta));
-
-            resultsDiv.innerHTML = '';
-            
-            if (data.length === 0) {
-                resultsDiv.innerHTML = '<div class="loading">No buses found. Try "All" or Refresh.</div>';
-            } else {
-                data.forEach(bus => {
-                    const arrivalTime = new Date(bus.eta);
-                    const diff = Math.floor((arrivalTime - now) / 60000);
-                    
-                    // Skip buses that have already passed (diff < -1)
-                    if (diff < -1) return;
-
-                    const timeStr = diff <= 0 ? "Arriving" : `${diff} min`;
-                    
-                    resultsDiv.innerHTML += `
-                        <div class="bus-card">
-                            <div class="route-no">${bus.route}</div>
-                            <div class="info">
-                                <div class="dest">${bus.dest_tc}<br>${bus.dest_en}</div>
-                            </div>
-                            <div class="eta-time">${timeStr}</div>
-                        </div>`;
-                });
-            }
-            timeDiv.innerText = `Last Updated: ${now.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit', second:'2-digit'})}`;
-        } catch (e) {
-            console.error("Fetch Error:", e);
-            resultsDiv.innerHTML = `<div class="error-msg">⚠️ Update Failed<br><small>${e.message}</small></div>`;
         }
+
+        if (!success) {
+            resultsDiv.innerHTML = `<div class="error-msg">⚠️ Server Rejected Request (422)<br><small>The bus company's data server is currently not responding to this stop ID.</small></div>`;
+            return;
+        }
+
+        // Processing the successful data
+        const now = new Date();
+        data = data.filter(bus => bus.eta);
+
+        if (currentFilter !== 'ALL') {
+            data = data.filter(bus => GROUPS[currentFilter].includes(bus.route));
+        }
+
+        data.sort((a, b) => new Date(a.eta) - new Date(b.eta));
+
+        resultsDiv.innerHTML = '';
+        if (data.length === 0) {
+            resultsDiv.innerHTML = '<div class="loading">No incoming buses found.</div>';
+        } else {
+            data.forEach(bus => {
+                const diff = Math.floor((new Date(bus.eta) - now) / 60000);
+                if (diff < -1) return;
+                const timeStr = diff <= 0 ? "Arriving" : `${diff} min`;
+                
+                resultsDiv.innerHTML += `
+                    <div class="bus-card">
+                        <div class="route-no">${bus.route}</div>
+                        <div class="info">
+                            <div class="dest">${bus.dest_tc || ''}<br>${bus.dest_en}</div>
+                        </div>
+                        <div class="eta-time">${timeStr}</div>
+                    </div>`;
+            });
+        }
+        timeDiv.innerText = `Last Updated: ${now.toLocaleTimeString()}`;
     }
 
-    // Initial fetch on load
     fetchETA();
 </script>
 </body>
