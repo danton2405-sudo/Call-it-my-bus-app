@@ -8,11 +8,18 @@
         :root { --ctb-red: #e60012; --ctb-yellow: #ffd900; --ios-blue: #007aff; }
         body { font-family: -apple-system, sans-serif; background: #f0f2f5; margin: 0; padding: 10px; }
         .header { background: white; padding: 15px; border-radius: 15px; box-shadow: 0 2px 10px rgba(0,0,0,0.05); margin-bottom: 10px; text-align: center; }
+        
+        /* GPS Styles */
+        .gps-btn { background: var(--ios-blue); color: white; border: none; padding: 12px; border-radius: 25px; font-weight: bold; cursor: pointer; width: 100%; margin-bottom: 10px; font-size: 1rem; }
+        .status-box { background: #fff9c4; padding: 10px; border-radius: 8px; font-size: 0.85rem; margin-bottom: 10px; font-weight: bold; border: 1px solid #ffe082; display: none; }
+
         .loc-selector { display: flex; gap: 5px; margin-bottom: 15px; background: #eee; padding: 4px; border-radius: 12px; }
         .loc-btn { flex: 1; border: none; padding: 12px; border-radius: 10px; cursor: pointer; font-weight: bold; background: transparent; transition: 0.2s; }
         .loc-btn.active { background: white; box-shadow: 0 2px 5px rgba(0,0,0,0.1); color: var(--ios-blue); }
+        
         .refresh-btn { background: #28a745; color: white; border: none; padding: 14px; border-radius: 25px; font-weight: bold; cursor: pointer; width: 100%; margin-bottom: 5px; }
         .timestamp { font-size: 0.75rem; color: #888; margin-bottom: 5px; }
+        
         .bus-card { background: white; padding: 15px; margin-bottom: 8px; border-radius: 12px; display: flex; justify-content: space-between; align-items: center; border-left: 6px solid var(--ctb-yellow); text-align: left; }
         .route-no { font-weight: 900; font-size: 1.6rem; color: var(--ctb-red); min-width: 75px; }
         .dest { font-size: 0.9rem; font-weight: bold; line-height: 1.2; flex-grow: 1; padding: 0 10px; }
@@ -22,11 +29,16 @@
 <body>
 
 <div class="header">
+    <h1 id="main-title" style="font-size: 1.1rem; margin-top:0;">🚌 Citybus Tracker</h1>
+    
+    <button class="gps-btn" onclick="useGPS()">📍 Find Nearest Stop</button>
+    <div id="status-box" class="status-box"></div>
+
     <div class="loc-selector">
         <button class="loc-btn active" onclick="switchLocation('002159', 'Yip Yee Mansion', this)">Aberdeen</button>
         <button class="loc-btn" onclick="switchLocation('001224', 'Healthy Village', this)">North Point</button>
     </div>
-    <h1 id="display-name" style="font-size: 1.1rem; margin: 5px 0;">🚌 Yip Yee Mansion</h1>
+    
     <button class="refresh-btn" onclick="fetchETA()">🔄 Refresh Times</button>
     <div id="last-updated" class="timestamp">Ready</div>
 </div>
@@ -34,32 +46,64 @@
 <div id="results"></div>
 
 <script>
-    // Global variable to track the selected stop ID
     let currentStopId = '002159';
+    let allStops = [];
 
-    // 1. Fixed ReferenceError: Function is defined globally
+    // Load stop list for GPS detection
+    async function loadStopList() {
+        try {
+            const res = await fetch('https://rt.data.gov.hk/v2/transport/citybus/stop/CTB');
+            const json = await res.json();
+            allStops = json.data || [];
+        } catch (e) { console.error("Could not load stops"); }
+    }
+
+    async function useGPS() {
+        const status = document.getElementById('status-box');
+        status.style.display = "block";
+        status.innerText = "Accessing GPS...";
+
+        navigator.geolocation.getCurrentPosition(async (pos) => {
+            const lat = pos.coords.latitude;
+            const lon = pos.coords.longitude;
+            
+            if (allStops.length === 0) await loadStopList();
+
+            // Find nearest stop
+            const nearest = allStops.reduce((prev, curr) => {
+                const dPrev = Math.hypot(lat - prev.lat, lon - prev.long);
+                const dCurr = Math.hypot(lat - curr.lat, lon - curr.long);
+                return dCurr < dPrev ? curr : prev;
+            });
+
+            status.innerText = `📍 Found: ${nearest.stop_name_tc}`;
+            switchLocation(nearest.stop, nearest.stop_name_tc);
+        }, (err) => {
+            status.innerText = "GPS Error: Check Safari permissions.";
+        }, { enableHighAccuracy: true, timeout: 5000 });
+    }
+
     function switchLocation(id, name, btn) {
         currentStopId = id;
-        document.getElementById('display-name').innerText = "🚌 " + name;
-        document.querySelectorAll('.loc-btn').forEach(b => b.classList.remove('active'));
-        btn.classList.add('active');
+        document.getElementById('main-title').innerText = "🚌 " + name;
+        if (btn) {
+            document.querySelectorAll('.loc-btn').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+        }
         fetchETA();
     }
 
-    // 2. Main fetching logic with Triple-Check for 422 Errors
     async function fetchETA() {
         const resultsDiv = document.getElementById('results');
         const timeDiv = document.getElementById('last-updated');
         resultsDiv.innerHTML = '<div style="text-align:center; padding:20px; color:#666;">Checking data...</div>';
 
-        // 3. Fixed 422 Error: Ensuring ID is a 6-digit string
         const formattedId = currentStopId.toString().padStart(6, '0');
-        
-        // Try all three owners to bypass the government API's 422 rejection
         const owners = ['CTB', 'NWFB', 'KMB'];
         let finalResults = [];
         let found = false;
 
+        // Triple-Check logic to bypass 422 errors
         for (let owner of owners) {
             try {
                 const url = `https://rt.data.gov.hk/v2/transport/citybus/eta/${owner}/${formattedId}`;
@@ -69,41 +113,36 @@
                     if (json.data && json.data.length > 0) {
                         finalResults = json.data;
                         found = true;
-                        break; // Success! Stop checking other owners
+                        break; 
                     }
                 }
-            } catch (e) { console.log(`${owner} rejected the request.`); }
+            } catch (e) { }
         }
 
         if (!found) {
-            resultsDiv.innerHTML = `<div style="text-align:center; color:red; padding:20px;">Server Error 422: Stop Not Found.</div>`;
+            resultsDiv.innerHTML = `<div style="text-align:center; color:red; padding:20px;">Stop ${formattedId} rejected by server (422).</div>`;
             return;
         }
 
         const now = new Date();
-        // 4. Fixed NaN: Filter for valid timestamps
         const sortedData = finalResults.filter(b => b.eta).sort((a, b) => new Date(a.eta) - now);
 
         resultsDiv.innerHTML = '';
-        if (sortedData.length === 0) {
-            resultsDiv.innerHTML = '<div style="text-align:center; padding:20px;">No buses arriving soon.</div>';
-        } else {
-            sortedData.slice(0, 20).forEach(bus => {
-                const diff = Math.floor((new Date(bus.eta) - now) / 60000);
-                if (diff < -1) return;
-                const timeStr = diff <= 0 ? "Arriving" : diff + " min";
-                resultsDiv.innerHTML += `
-                    <div class="bus-card">
-                        <div class="route-no">${bus.route}</div>
-                        <div class="dest">${bus.dest_tc}<br><small>${bus.dest_en}</small></div>
-                        <div class="eta">${timeStr}</div>
-                    </div>`;
-            });
-        }
+        sortedData.slice(0, 20).forEach(bus => {
+            const diff = Math.floor((new Date(bus.eta) - now) / 60000);
+            if (diff < -1) return;
+            const timeStr = diff <= 0 ? "Arriving" : diff + " min";
+            resultsDiv.innerHTML += `
+                <div class="bus-card">
+                    <div class="route-no">${bus.route}</div>
+                    <div class="dest">${bus.dest_tc}<br><small>${bus.dest_en}</small></div>
+                    <div class="eta">${timeStr}</div>
+                </div>`;
+        });
         timeDiv.innerText = "Last Updated: " + now.toLocaleTimeString();
     }
 
-    // Initial load
+    loadStopList();
     window.onload = fetchETA;
 </script>
 </body>
