@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>HK Bus Tracker - Yip Yee & Healthy Village</title>
+    <title>HK Bus Tracker - GPS & Manual Search</title>
     <style>
         :root { --ctb-red: #e60012; --ctb-yellow: #ffd900; --ios-blue: #007aff; }
         body { font-family: -apple-system, sans-serif; background: #f0f2f5; margin: 0; padding: 10px; }
@@ -12,12 +12,11 @@
         #stop-search { width: 100%; padding: 12px; border-radius: 10px; border: 1px solid #ccc; box-sizing: border-box; font-size: 1rem; outline: none; }
         .search-results { position: absolute; width: 100%; background: white; z-index: 100; max-height: 250px; overflow-y: auto; border-radius: 10px; box-shadow: 0 4px 15px rgba(0,0,0,0.15); display: none; }
         .search-item { padding: 12px; border-bottom: 1px solid #eee; cursor: pointer; text-align: left; font-size: 0.9rem; }
+        .gps-btn { background: #007aff; color: white; border: none; padding: 12px; border-radius: 25px; font-weight: bold; cursor: pointer; width: 100%; margin-bottom: 10px; }
+        .status-box { background: #fff9c4; padding: 10px; border-radius: 8px; font-size: 0.85rem; margin-bottom: 10px; font-weight: bold; display: none; }
         .stop-selector { display: flex; gap: 5px; margin-bottom: 10px; background: #eee; padding: 3px; border-radius: 10px; }
         .stop-btn { flex: 1; border: none; padding: 12px; border-radius: 8px; cursor: pointer; font-weight: bold; background: transparent; }
         .stop-btn.active { background: white; box-shadow: 0 2px 5px rgba(0,0,0,0.1); color: var(--ios-blue); }
-        .filters { display: flex; flex-wrap: wrap; gap: 5px; justify-content: center; margin-bottom: 10px; }
-        .filter-btn { border: 1px solid #ccc; background: white; padding: 6px 12px; border-radius: 20px; font-size: 0.8rem; cursor: pointer; }
-        .filter-btn.active { background: var(--ios-blue); color: white; border-color: var(--ios-blue); }
         .refresh-btn { background: #28a745; color: white; border: none; padding: 12px; border-radius: 25px; font-weight: bold; cursor: pointer; width: 100%; margin-bottom: 5px; }
         .timestamp { font-size: 0.75rem; color: #888; margin-bottom: 10px; }
         .bus-card { background: white; padding: 15px; margin-bottom: 8px; border-radius: 12px; display: flex; justify-content: space-between; align-items: center; border-left: 6px solid var(--ctb-yellow); }
@@ -29,21 +28,21 @@
 <body>
 
 <div class="header">
-    <h1 id="main-title" style="font-size: 1.1rem; margin-top:0;">🚌 Yip Yee Mansion (業漁大廈)</h1>
+    <h1 id="main-title" style="font-size: 1.1rem; margin-top:0;">🚌 Bus Tracker</h1>
+    
+    <button class="gps-btn" onclick="useGPS()">📍 Auto-Detect Nearest Stop</button>
+    <div id="status-box" class="status-box"></div>
+
     <div class="search-container">
         <input type="text" id="stop-search" placeholder="🔍 Search Stop (e.g. Healthy Village)" oninput="handleSearch()">
         <div id="search-results" class="search-results"></div>
     </div>
+
     <div class="stop-selector">
-        <button class="stop-btn active" onclick="setStop('002159', 'Yip Yee Mansion (East)', this)">Eastbound</button>
-        <button class="stop-btn" onclick="setStop('002161', 'Yip Yee Mansion (West)', this)">Westbound</button>
+        <button class="stop-btn active" onclick="setStop('002159', 'Yip Yee Mansion (East)', this)">Aberdeen (E)</button>
+        <button class="stop-btn" onclick="setStop('002161', 'Yip Yee Mansion (West)', this)">Aberdeen (W)</button>
     </div>
-    <div class="filters">
-        <button class="filter-btn active" onclick="setFilter('ALL', this)">All</button>
-        <button class="filter-btn" onclick="setFilter('CENTRAL', this)">Central</button>
-        <button class="filter-btn" onclick="setFilter('CWB', this)">CWB</button>
-        <button class="filter-btn" onclick="setFilter('KOWLOON', this)">Kowloon</button>
-    </div>
+
     <button class="refresh-btn" onclick="fetchAllETA()">🔄 Refresh Times</button>
     <div id="last-updated" class="timestamp">Tap Refresh to start</div>
 </div>
@@ -51,23 +50,16 @@
 <div id="results"></div>
 
 <script>
-    const GROUPS = {
-        'CENTRAL': ['37A', '70', '75', '90B', '97', 'A10'],
-        'CWB': ['38', '42', '72', '77'],
-        'KOWLOON': ['107', '170', '671']
-    };
-
     let currentStop = '002159';
-    let currentFilter = 'ALL';
     let allStops = [];
 
-    // FIXED: Properly extracting the array to avoid .filter crash
     async function loadStops() {
         try {
             const res = await fetch('https://rt.data.gov.hk/v2/transport/citybus/stop/CTB');
             const json = await res.json();
-            allStops = json.data || []; //
-        } catch (e) { console.error("Search failed to load."); }
+            // FIX: Ensure allStops is an array from the .data property
+            allStops = json.data || []; 
+        } catch (e) { console.error("Could not load stop list"); }
     }
 
     function handleSearch() {
@@ -75,14 +67,14 @@
         const resultsBox = document.getElementById('search-results');
         if (input.length < 2) { resultsBox.style.display = 'none'; return; }
 
-        // FIXED: allStops is now an array, so .filter() will work
+        // FIX: filter now works because allStops is an array
         const filtered = allStops.filter(s => 
             s.stop_name_tc.includes(input) || s.stop_name_en.toLowerCase().includes(input)
         ).slice(0, 10);
 
         if (filtered.length > 0) {
             resultsBox.innerHTML = filtered.map(s => `
-                <div class="search-item" onclick="selectSearchStop('${s.stop}', '${s.stop_name_tc}')">
+                <div class="search-item" onclick="selectStop('${s.stop}', '${s.stop_name_tc}')">
                     ${s.stop_name_tc} <br><small>${s.stop_name_en}</small>
                 </div>
             `).join('');
@@ -90,57 +82,69 @@
         } else { resultsBox.style.display = 'none'; }
     }
 
-    function selectSearchStop(id, name) {
+    function selectStop(id, name) {
         document.getElementById('search-results').style.display = 'none';
-        document.getElementById('stop-search').value = name;
-        document.getElementById('main-title').innerText = `🚌 ${name}`;
-        document.querySelectorAll('.stop-btn').forEach(b => b.classList.remove('active'));
-        currentStop = id;
-        fetchAllETA();
+        document.getElementById('stop-search').value = '';
+        updateUI(id, name);
     }
 
     function setStop(id, name, btn) {
+        document.querySelectorAll('.stop-btn').forEach(b => b.classList.remove('active'));
+        if(btn) btn.classList.add('active');
+        updateUI(id, name);
+    }
+
+    function updateUI(id, name) {
         currentStop = id;
         document.getElementById('main-title').innerText = `🚌 ${name}`;
-        document.querySelectorAll('.stop-btn').forEach(b => b.classList.remove('active'));
-        btn.classList.add('active');
         fetchAllETA();
     }
 
-    function setFilter(cat, btn) {
-        currentFilter = cat;
-        document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
-        btn.classList.add('active');
-        fetchAllETA();
+    async function useGPS() {
+        const status = document.getElementById('status-box');
+        status.style.display = "block";
+        status.innerText = "Accessing GPS...";
+
+        navigator.geolocation.getCurrentPosition(async (pos) => {
+            const lat = pos.coords.latitude;
+            const lon = pos.coords.longitude;
+            
+            if (allStops.length === 0) await loadStops();
+
+            const nearest = allStops.reduce((prev, curr) => {
+                const dPrev = Math.hypot(lat - prev.lat, lon - prev.long);
+                const dCurr = Math.hypot(lat - curr.lat, lon - curr.long);
+                return dCurr < dPrev ? curr : prev;
+            });
+
+            status.innerText = `📍 Nearest: ${nearest.stop_name_tc}`;
+            setStop(nearest.stop, nearest.stop_name_tc);
+        }, (err) => {
+            status.innerText = "GPS Error: Please check permissions or use search.";
+        }, { enableHighAccuracy: true, timeout: 5000 });
     }
 
     async function fetchAllETA() {
         const resultsDiv = document.getElementById('results');
-        const timeDiv = document.getElementById('last-updated');
         resultsDiv.innerHTML = '<div style="text-align:center; padding:20px;">Loading...</div>';
 
-        // FIXED: Ensuring the Stop ID is 6-digits with leading zeros to fix 422 error
+        // FIX: Ensure Stop ID is 6-digits with leading zeros to stop 422 errors
         const formattedId = currentStop.toString().padStart(6, '0');
         const url = `https://rt.data.gov.hk/v2/transport/citybus/eta/CTB/${formattedId}`;
 
         try {
             const res = await fetch(url);
-            if (!res.ok) throw new Error(`Status ${res.status}`);
+            if (!res.ok) throw new Error(`Server Error: ${res.status}`);
             const json = await res.json();
-            let data = json.data || [];
+            const data = json.data || [];
 
-            if (currentFilter !== 'ALL') {
-                data = data.filter(bus => GROUPS[currentFilter].includes(bus.route));
-            }
-
-            data.sort((a, b) => new Date(a.eta) - new Date(b.eta));
             resultsDiv.innerHTML = '';
             const now = new Date();
 
             if (data.length === 0) {
                 resultsDiv.innerHTML = '<div style="text-align:center; padding:20px;">No buses found.</div>';
             } else {
-                data.slice(0, 20).forEach(bus => {
+                data.sort((a, b) => new Date(a.eta) - new Date(b.eta)).slice(0, 20).forEach(bus => {
                     const diff = Math.floor((new Date(bus.eta) - now) / 60000);
                     if (diff < -1) return;
                     const timeStr = diff <= 0 ? "Arriving" : `${diff} min`;
@@ -152,7 +156,7 @@
                         </div>`;
                 });
             }
-            timeDiv.innerText = `Last Updated: ${now.toLocaleTimeString()}`;
+            document.getElementById('last-updated').innerText = `Last Updated: ${now.toLocaleTimeString()}`;
         } catch (e) { resultsDiv.innerHTML = `<div style="text-align:center; color:red;">${e.message}</div>`; }
     }
 
