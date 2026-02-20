@@ -92,33 +92,21 @@
         }
         fetchETA();
     }
-
-    async function fetchETA() {
-        const resultsDiv = document.getElementById('results');
-        const timeDiv = document.getElementById('last-updated');
-        resultsDiv.innerHTML = '<div style="text-align:center; padding:20px; color:#666;">Checking data...</div>';
-
-        const formattedId = currentStopId.toString().padStart(6, '0');
-        const owners = ['CTB', 'NWFB', 'KMB'];
-        let finalResults = [];
-        let found = false;
-
-        // Triple-Check logic to bypass 422 errors
-        for (let owner of owners) {
-            try {
-                const url = `https://rt.data.gov.hk/v2/transport/citybus/eta/${owner}/${formattedId}`;
-                const res = await fetch(url);
-                if (res.ok) {
-                    const json = await res.json();
-                    if (json.data && json.data.length > 0) {
-                        finalResults = json.data;
-                        found = true;
-                        break; 
-                    }
-                }
-            } catch (e) { }
+   async function fetchETA(stopId) {
+    // Force the ID to be a 6-digit string with leading zeros
+    const formattedId = stopId.toString().padStart(6, '0');
+    
+    // Try possible stop "owners" to avoid 422 errors
+    const owners = ['CTB', 'KMB', 'NWFB'];
+    for (let owner of owners) {
+        const url = `https://rt.data.gov.hk/v2/transport/citybus/eta/${owner}/${formattedId}`;
+        const res = await fetch(url);
+        if (res.ok) {
+            const json = await res.json();
+            if (json.data && json.data.length > 0) return json.data;
         }
-
+    }
+}
         if (!found) {
             resultsDiv.innerHTML = `<div style="text-align:center; color:red; padding:20px;">Stop ${formattedId} rejected by server (422).</div>`;
             return;
