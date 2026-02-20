@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>HK Bus Tracker - GPS & Manual Search</title>
+    <title>HK Bus Tracker - Final Fix</title>
     <style>
         :root { --ctb-red: #e60012; --ctb-yellow: #ffd900; --ios-blue: #007aff; }
         body { font-family: -apple-system, sans-serif; background: #f0f2f5; margin: 0; padding: 10px; }
@@ -19,7 +19,7 @@
         .stop-btn.active { background: white; box-shadow: 0 2px 5px rgba(0,0,0,0.1); color: var(--ios-blue); }
         .refresh-btn { background: #28a745; color: white; border: none; padding: 12px; border-radius: 25px; font-weight: bold; cursor: pointer; width: 100%; margin-bottom: 5px; }
         .timestamp { font-size: 0.75rem; color: #888; margin-bottom: 10px; }
-        .bus-card { background: white; padding: 15px; margin-bottom: 8px; border-radius: 12px; display: flex; justify-content: space-between; align-items: center; border-left: 6px solid var(--ctb-yellow); }
+        .bus-card { background: white; padding: 15px; margin-bottom: 8px; border-radius: 12px; display: flex; justify-content: space-between; align-items: center; border-left: 6px solid var(--ctb-yellow); text-align: left; }
         .route-no { font-weight: 900; font-size: 1.6rem; color: var(--ctb-red); min-width: 75px; }
         .dest { font-size: 0.9rem; font-weight: bold; line-height: 1.2; flex-grow: 1; padding: 0 10px; }
         .eta { font-weight: bold; color: var(--ios-blue); font-size: 1.3rem; min-width: 80px; text-align: right; }
@@ -29,20 +29,16 @@
 
 <div class="header">
     <h1 id="main-title" style="font-size: 1.1rem; margin-top:0;">🚌 Bus Tracker</h1>
-    
     <button class="gps-btn" onclick="useGPS()">📍 Auto-Detect Nearest Stop</button>
     <div id="status-box" class="status-box"></div>
-
     <div class="search-container">
         <input type="text" id="stop-search" placeholder="🔍 Search Stop (e.g. Healthy Village)" oninput="handleSearch()">
         <div id="search-results" class="search-results"></div>
     </div>
-
     <div class="stop-selector">
         <button class="stop-btn active" onclick="setStop('002159', 'Yip Yee Mansion (East)', this)">Aberdeen (E)</button>
         <button class="stop-btn" onclick="setStop('002161', 'Yip Yee Mansion (West)', this)">Aberdeen (W)</button>
     </div>
-
     <button class="refresh-btn" onclick="fetchAllETA()">🔄 Refresh Times</button>
     <div id="last-updated" class="timestamp">Tap Refresh to start</div>
 </div>
@@ -57,8 +53,8 @@
         try {
             const res = await fetch('https://rt.data.gov.hk/v2/transport/citybus/stop/CTB');
             const json = await res.json();
-            // FIX: Ensure allStops is an array from the .data property
-            allStops = json.data || []; 
+            // FIX: allStops must be the array found in json.data
+            allStops = json.data || [];
         } catch (e) { console.error("Could not load stop list"); }
     }
 
@@ -66,8 +62,7 @@
         const input = document.getElementById('stop-search').value.toLowerCase();
         const resultsBox = document.getElementById('search-results');
         if (input.length < 2) { resultsBox.style.display = 'none'; return; }
-
-        // FIX: filter now works because allStops is an array
+        // FIX: Ensuring allStops is an array so .filter() works
         const filtered = allStops.filter(s => 
             s.stop_name_tc.includes(input) || s.stop_name_en.toLowerCase().includes(input)
         ).slice(0, 10);
@@ -108,7 +103,6 @@
         navigator.geolocation.getCurrentPosition(async (pos) => {
             const lat = pos.coords.latitude;
             const lon = pos.coords.longitude;
-            
             if (allStops.length === 0) await loadStops();
 
             const nearest = allStops.reduce((prev, curr) => {
@@ -120,7 +114,7 @@
             status.innerText = `📍 Nearest: ${nearest.stop_name_tc}`;
             setStop(nearest.stop, nearest.stop_name_tc);
         }, (err) => {
-            status.innerText = "GPS Error: Please check permissions or use search.";
+            status.innerText = "GPS Error: Check Safari permissions.";
         }, { enableHighAccuracy: true, timeout: 5000 });
     }
 
@@ -128,7 +122,7 @@
         const resultsDiv = document.getElementById('results');
         resultsDiv.innerHTML = '<div style="text-align:center; padding:20px;">Loading...</div>';
 
-        // FIX: Ensure Stop ID is 6-digits with leading zeros to stop 422 errors
+        // FIX: Force Stop ID to be exactly 6 digits to fix Error 422
         const formattedId = currentStop.toString().padStart(6, '0');
         const url = `https://rt.data.gov.hk/v2/transport/citybus/eta/CTB/${formattedId}`;
 
@@ -157,7 +151,7 @@
                 });
             }
             document.getElementById('last-updated').innerText = `Last Updated: ${now.toLocaleTimeString()}`;
-        } catch (e) { resultsDiv.innerHTML = `<div style="text-align:center; color:red;">${e.message}</div>`; }
+        } catch (e) { resultsDiv.innerHTML = `<div style="text-align:center; color:red; padding:10px;">${e.message}</div>`; }
     }
 
     loadStops();
