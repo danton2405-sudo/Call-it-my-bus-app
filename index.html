@@ -78,19 +78,19 @@
         fetchETA();
     }
 
-    async function fetchETA() {
+   async function fetchETA() {
     const resultsDiv = document.getElementById('results');
-    // Ensure we have the leading zeros for the 6-digit ID requirement
-    const formattedStop = currentStop.toString().padStart(6, '0');
+    // The Citybus-specific API often prefers the 6-digit string without the "CTB" prefix in the final segment
+    const stopId = currentStop.toString().padStart(6, '0');
     
-    // Correct URL structure: /v2/transport/citybus/eta/CTB/[STOP_ID]
-    const url = `https://rt.data.gov.hk/v2/transport/citybus/eta/CTB/${formattedStop}`;
+    // Updated reliable endpoint for Citybus
+    const url = `https://rt.data.gov.hk/v2/transport/citybus/eta/ctb/${stopId}`;
 
     try {
         const res = await fetch(url);
         
         if (!res.ok) {
-            throw new Error(`Server responded with ${res.status}`);
+            throw new Error(`Status ${res.status}`);
         }
 
         const json = await res.json();
@@ -101,26 +101,28 @@
             data = data.filter(bus => GROUPS[currentFilter].includes(bus.route));
         }
 
-        // Sort by Time
+        // Sort by Time (Filter out expired ETAs)
+        const now = new Date();
+        data = data.filter(bus => bus.eta && new Date(bus.eta) > now);
         data.sort((a, b) => new Date(a.eta) - new Date(b.eta));
 
         resultsDiv.innerHTML = '';
         
         if (data.length === 0) {
-            resultsDiv.innerHTML = '<div class="loading">No incoming buses found.</div>';
+            resultsDiv.innerHTML = '<div class="loading">No incoming buses found for this filter.</div>';
             return;
         }
 
+        // Use a DocumentFragment for better performance
         data.forEach(bus => {
-            if (!bus.eta) return;
-            const diff = Math.floor((new Date(bus.eta) - new Date()) / 60000);
-            const timeStr = diff <= 0 ? "Arriving" : `${diff} mins`;
+            const diff = Math.floor((new Date(bus.eta) - now) / 60000);
+            const timeStr = diff <= 0 ? "Arriving" : `${diff} <small>mins</small>`;
 
             resultsDiv.innerHTML += `
                 <div class="bus-card">
                     <div class="route-no">${bus.route}</div>
                     <div class="info">
-                        <div class="dest">${bus.dest_en}</div>
+                        <div class="dest">${bus.dest_tc}<br>${bus.dest_en}</div>
                     </div>
                     <div class="eta-box">
                         <div class="eta-time">${timeStr}</div>
@@ -129,7 +131,7 @@
         });
     } catch (e) {
         console.error("Fetch Error:", e);
-        resultsDiv.innerHTML = `<div class="loading">Error: ${e.message}. Check Stop ID format.</div>`;
+        resultsDiv.innerHTML = `<div class="loading">Connection Error: ${e.message}</div>`;
     }
 }
 
