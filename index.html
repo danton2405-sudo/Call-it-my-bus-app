@@ -1,45 +1,59 @@
-async function findStopId(route, direction) {
-    try {
-        document.getElementById('status').textContent = 'Finding stop...';
-        const res = await fetch(`${BASE_URL}route-stop/${COMPANY}/${route}/${direction}`);
+<!DOCTYPE html>
+<html lang="zh-HK">
+<head>
+  <meta charset="UTF-8">
+  <title>Yip Yee Mansion Real ETA</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; max-width: 400px; margin: 40px auto; padding: 20px; }
+    h1 { font-size: 22px; margin-bottom: 20px; }
+    label { display: block; margin: 10px 0 4px; }
+    select, button { width: 100%; padding: 12px; font-size: 16px; margin-bottom: 12px; border: 1px solid #ddd; border-radius: 6px; }
+    button { background: #007AFF; color: white; border: none; }
+    #result { margin-top: 12px; padding: 12px; background: #f0f8ff; border-radius: 6px; font-size: 16px; }
+    .eta { font-weight: 600; color: #007AFF; }
+    .error { color: red; }
+  </style>
+</head>
+<body>
+  <h1>Yip Yee Mansion 業漁大廈<br>Real ETA</h1>
+
+  <label>Route</label>
+  <select id="route">
+    <option value="98/1/YPM">98 to Lei Tung (dir1)</option>
+    <option value="98/2/YPM">98 to Aberdeen (dir2)</option>
+    <!-- Add more: 38/1/YPM, 77/1/YPM etc. once you confirm IDs -->
+  </select>
+
+  <button onclick="getETA()">Get Real ETA</button>
+  <div id="result">Press button for live bus times.</div>
+
+  <script>
+    async function getETA() {
+      const result = document.getElementById('result');
+      const sel = document.getElementById('route').value; // e.g. "98/1/YPM"
+      const [route, dir, stop] = sel.split('/');
+
+      result.innerHTML = 'Loading...';
+      
+      try {
+        const url = `https://rt.data.gov.hk/v2/transport/citybus/eta/CTB/${route}/${dir}/${stop}`;
+        const res = await fetch(url);
         const data = await res.json();
 
-        if (!data.data || data.data.length === 0) {
-            console.log(`No stops for ${route} ${direction}`);
-            return null;
+        if (data.data.length === 0) {
+          result.innerHTML = '<span class="error">No buses scheduled now.</span>';
+          return;
         }
 
-        // Very lenient match: key words anywhere, ignore case/spaces/punctuation
-        const keywordsEn = ['yip', 'yee', 'mansion'];
-        const keywordsTc = ['業漁', '大廈'];
-
-        const stop = data.data.find(s => {
-            const enLower = (s.name_en || '').toLowerCase().replace(/[^a-z0-9]/g, ''); // remove commas/spaces/etc
-            const tcLower = (s.name_tc || '').toLowerCase();
-
-            const enHasAll = keywordsEn.every(kw => enLower.includes(kw));
-            const tcHasAny = keywordsTc.some(kw => tcLower.includes(kw));
-
-            return enHasAll || tcHasAny || (enLower.includes('aberdeen') && enLower.includes('main') && enLower.includes('yip'));
-        });
-
-        if (stop) {
-            console.log('Matched stop:', stop.name_en, stop.name_tc, 'ID:', stop.stop);
-            return stop.stop;
-        } else {
-            console.log('No match. Showing first 5 stops for debug:', 
-                data.data.slice(0,5).map(s => `${s.seq}: ${s.name_en || s.name_tc} (ID: ${s.stop})`)
-            );
-
-            // Hardcoded fallback for known routes/stops (update if you find the real ID)
-            if (route === 'A10') return '001213'; // Example from some data - test and replace
-            if (route === '98') return null; // Remove if we find real ID later
-
-            return null;
-        }
-    } catch (err) {
-        console.error('Stops fetch failed:', err);
-        document.getElementById('status').innerHTML = `<span class="error">Failed to load stops: ${err.message}. Check internet or try GitHub Pages.</span>`;
-        return null;
+        let etas = data.data.map(bus => 
+          `<div>${bus.eta} (${bus.rmk_tc || 'Normal'})</div>`
+        ).join('');
+        result.innerHTML = `<div>Next buses:</div>${etas}`;
+      } catch (e) {
+        result.innerHTML = '<span class="error">API error, try again.</span>';
+      }
     }
-}
+  </script>
+</body>
+</html>
