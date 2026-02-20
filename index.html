@@ -82,13 +82,13 @@
     async function fetchETA() {
         const resultsDiv = document.getElementById('results');
         const timeDiv = document.getElementById('last-updated');
-        resultsDiv.innerHTML = '<div style="text-align:center; padding:20px; color:#666;">Checking data...</div>';
+        resultsDiv.innerHTML = '<div style="text-align:center; padding:20px; color:#666;">Checking Citybus data...</div>';
 
-        // 1. FIX: Ensure ID is 6-digit string with leading zeros
+        // Ensuring Stop ID is a 6-digit string
         const formattedId = currentStopId.toString().padStart(6, '0');
         
-        // 2. FIX: Try all 3 owners to bypass the 422 error
-        const owners = ['CTB', 'NWFB', 'KMB'];
+        // Cycle through owners to bypass 422 Errors
+        const owners = ['NWFB', 'CTB', 'KMB'];
         let finalResults = [];
         let found = false;
 
@@ -104,7 +104,7 @@
                         break; 
                     }
                 }
-            } catch (e) { console.log(`${owner} rejected.`); }
+            } catch (e) { console.log(`${owner} rejected stop ${formattedId}`); }
         }
 
         if (!found) {
