@@ -6,39 +6,28 @@
     <title>Yip Yee Mansion Bus Tracker</title>
     <style>
         :root { --ctb-red: #e60012; --ctb-yellow: #ffd900; --ios-blue: #007aff; }
-        body { font-family: -apple-system, sans-serif; background: #f0f2f5; margin: 0; padding: 15px; }
-        .header { background: white; padding: 15px; border-radius: 15px; box-shadow: 0 2px 10px rgba(0,0,0,0.05); margin-bottom: 15px; text-align: center; }
+        body { font-family: -apple-system, sans-serif; background: #f0f2f5; margin: 0; padding: 10px; }
+        .header { background: white; padding: 15px; border-radius: 15px; box-shadow: 0 2px 10px rgba(0,0,0,0.05); margin-bottom: 10px; text-align: center; }
         h1 { margin: 0 0 10px 0; font-size: 1.1rem; color: #333; }
         
-        /* Stop Selector Tabs */
-        .stop-selector { display: flex; gap: 5px; margin-bottom: 15px; background: #ddd; padding: 3px; border-radius: 10px; }
-        .stop-btn { flex: 1; border: none; padding: 8px; border-radius: 8px; cursor: pointer; font-weight: bold; font-size: 0.8rem; background: transparent; }
-        .stop-btn.active { background: white; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
+        .stop-selector { display: flex; gap: 5px; margin-bottom: 10px; background: #eee; padding: 3px; border-radius: 10px; }
+        .stop-btn { flex: 1; border: none; padding: 10px; border-radius: 8px; cursor: pointer; font-weight: bold; font-size: 0.8rem; background: transparent; }
+        .stop-btn.active { background: white; box-shadow: 0 2px 5px rgba(0,0,0,0.1); color: var(--ios-blue); }
 
-        /* Filter & Refresh Row */
-        .controls-row { display: flex; justify-content: center; align-items: center; gap: 10px; margin-bottom: 15px; flex-wrap: wrap; }
+        .controls-row { display: flex; flex-direction: column; align-items: center; gap: 10px; margin-bottom: 10px; }
         .filters { display: flex; flex-wrap: wrap; gap: 5px; justify-content: center; }
         .filter-btn { border: 1px solid #ccc; background: white; padding: 6px 12px; border-radius: 20px; font-size: 0.8rem; cursor: pointer; }
         .filter-btn.active { background: var(--ios-blue); color: white; border-color: var(--ios-blue); }
 
-        /* Refresh Button */
-        .refresh-btn { 
-            background: #28a745; color: white; border: none; padding: 8px 15px; 
-            border-radius: 20px; font-weight: bold; cursor: pointer; display: flex; align-items: center; gap: 5px;
-        }
-        .refresh-btn:active { transform: scale(0.95); opacity: 0.8; }
+        .refresh-btn { background: #28a745; color: white; border: none; padding: 10px 20px; border-radius: 20px; font-weight: bold; cursor: pointer; width: 100%; max-width: 200px; }
+        .timestamp { font-size: 0.7rem; color: #888; margin-top: 5px; }
 
-        /* Bus Cards */
-        .bus-card { 
-            background: white; padding: 15px; margin-bottom: 10px; 
-            border-radius: 12px; display: flex; justify-content: space-between; align-items: center;
-            border-left: 5px solid var(--ctb-yellow);
-        }
-        .route-no { font-weight: 800; font-size: 1.5rem; color: var(--ctb-red); min-width: 60px; }
+        .bus-card { background: white; padding: 15px; margin-bottom: 8px; border-radius: 12px; display: flex; justify-content: space-between; align-items: center; border-left: 5px solid var(--ctb-yellow); }
+        .route-no { font-weight: 800; font-size: 1.4rem; color: var(--ctb-red); min-width: 60px; }
         .info { flex-grow: 1; padding-left: 10px; }
-        .dest { font-size: 0.85rem; color: #666; font-weight: 500; }
-        .eta-time { font-weight: bold; color: var(--ios-blue); font-size: 1.2rem; text-align: right; }
-        .loading { text-align: center; padding: 40px; color: #888; }
+        .dest { font-size: 0.85rem; color: #444; font-weight: bold; line-height: 1.2; }
+        .eta-time { font-weight: bold; color: var(--ios-blue); font-size: 1.2rem; }
+        .loading { text-align: center; padding: 40px; color: #888; font-style: italic; }
     </style>
 </head>
 <body>
@@ -55,8 +44,10 @@
             <button class="filter-btn active" onclick="setFilter('ALL', this)">All</button>
             <button class="filter-btn" onclick="setFilter('CENTRAL', this)">Central</button>
             <button class="filter-btn" onclick="setFilter('CWB', this)">CWB</button>
+            <button class="filter-btn" onclick="setFilter('KOWLOON', this)">Kowloon</button>
         </div>
-        <button class="refresh-btn" onclick="fetchETA()">🔄 Refresh</button>
+        <button class="refresh-btn" onclick="fetchETA()">🔄 Refresh Times</button>
+        <div id="last-updated" class="timestamp">Not updated yet</div>
     </div>
 </div>
 
@@ -65,7 +56,6 @@
 <script>
     let currentStop = "002159";
     let currentFilter = "ALL";
-
     const GROUPS = {
         'CENTRAL': ['37A', '70', '70P', '75', '90B', '97'],
         'CWB': ['38', '42', '42C', '72', '72A', '77'],
@@ -88,56 +78,53 @@
 
     async function fetchETA() {
         const resultsDiv = document.getElementById('results');
-        resultsDiv.innerHTML = '<div class="loading">Fetching latest times...</div>';
+        const timeDiv = document.getElementById('last-updated');
+        resultsDiv.innerHTML = '<div class="loading">Loading live data...</div>';
         
-        // Use lowercase 'ctb' to avoid 422 errors
-        const stopId = currentStop.toString().padStart(6, '0');
-        const url = `https://rt.data.gov.hk/v2/transport/citybus/eta/ctb/${stopId}`;
+        // This specific URL format is the most robust for CTB Stop ETAs
+        const url = `https://rt.data.gov.hk/v2/transport/citybus/eta/CTB/${currentStop}`;
 
         try {
             const res = await fetch(url);
-            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            if (!res.ok) throw new Error(`Server Error (${res.status})`);
             
             const json = await res.json();
             let data = json.data || [];
 
+            // Apply Group Filter
             if (currentFilter !== 'ALL') {
                 data = data.filter(bus => GROUPS[currentFilter].includes(bus.route));
             }
 
-            // Remove expired ETAs and sort
+            // Remove empty/past ETAs and Sort
             const now = new Date();
-            data = data.filter(bus => bus.eta && new Date(bus.eta) > now);
-            data.sort((a, b) => new Date(a.eta) - new Date(b.eta));
+            data = data.filter(bus => bus.eta).sort((a, b) => new Date(a.eta) - new Date(b.eta));
 
             resultsDiv.innerHTML = '';
             
             if (data.length === 0) {
-                resultsDiv.innerHTML = '<div class="loading">No buses found.</div>';
-                return;
+                resultsDiv.innerHTML = '<div class="loading">No buses found. Try a different filter.</div>';
+            } else {
+                data.forEach(bus => {
+                    const diff = Math.floor((new Date(bus.eta) - now) / 60000);
+                    const timeStr = diff <= 0 ? "Arriving" : `${diff} min`;
+                    resultsDiv.innerHTML += `
+                        <div class="bus-card">
+                            <div class="route-no">${bus.route}</div>
+                            <div class="info">
+                                <div class="dest">${bus.dest_tc}<br>${bus.dest_en}</div>
+                            </div>
+                            <div class="eta-time">${timeStr}</div>
+                        </div>`;
+                });
             }
-
-            data.forEach(bus => {
-                const diff = Math.floor((new Date(bus.eta) - now) / 60000);
-                const timeStr = diff <= 0 ? "Arriving" : `${diff} mins`;
-
-                resultsDiv.innerHTML += `
-                    <div class="bus-card">
-                        <div class="route-no">${bus.route}</div>
-                        <div class="info">
-                            <div class="dest">${bus.dest_tc}<br>${bus.dest_en}</div>
-                        </div>
-                        <div class="eta-time">${timeStr}</div>
-                    </div>`;
-            });
+            timeDiv.innerText = `Last Updated: ${now.toLocaleTimeString()}`;
         } catch (e) {
-            resultsDiv.innerHTML = `<div class="loading">Error: ${e.message}</div>`;
+            resultsDiv.innerHTML = `<div class="loading" style="color:red">Error: ${e.message}<br>Please check your internet connection.</div>`;
         }
     }
 
-    // Initial load
     fetchETA();
 </script>
-
 </body>
 </html>
