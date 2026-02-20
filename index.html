@@ -136,46 +136,58 @@
     }
 
     async function fetchAllETA() {
-        const resultsDiv = document.getElementById('results');
-        const timeDiv = document.getElementById('last-updated');
-        resultsDiv.innerHTML = '<div style="text-align:center; padding:20px; color:#666;">Loading...</div>';
+    const resultsDiv = document.getElementById('results');
+    const timeDiv = document.getElementById('last-updated');
+    resultsDiv.innerHTML = '<div style="text-align:center; padding:20px; color:#666;">Loading...</div>';
 
-        // Efficiently fetch all routes for the current stop
-        try {
-            const res = await fetch(`https://rt.data.gov.hk/v2/transport/citybus/eta/CTB/${currentStop}`);
-            const json = await res.json();
-            let data = json.data || [];
+    // 1. ENSURE STOP ID IS 6 DIGITS (This fixes the 422 error)
+    const formattedStopId = currentStop.toString().padStart(6, '0');
+    const url = `https://rt.data.gov.hk/v2/transport/citybus/eta/CTB/${formattedStopId}`;
 
-            if (currentFilter !== 'ALL') {
-                data = data.filter(bus => GROUPS[currentFilter].includes(bus.route));
-            }
+    try {
+        const res = await fetch(url);
+        
+        // 2. Check if the server actually returned a success (200 OK)
+        if (!res.ok) {
+            throw new Error(`HTTP Error ${res.status}`);
+        }
 
-            // Sort by arrival time
-            data.sort((a, b) => new Date(a.eta) - new Date(b.eta));
+        const json = await res.json();
+        let data = json.data || [];
 
-            resultsDiv.innerHTML = '';
-            const now = new Date();
+        // Apply your Group Filters (Central, CWB, etc.)
+        if (currentFilter !== 'ALL') {
+            data = data.filter(bus => GROUPS[currentFilter].includes(bus.route));
+        }
 
-            if (data.length === 0) {
-                resultsDiv.innerHTML = '<div style="text-align:center; padding:20px;">No buses scheduled.</div>';
-            } else {
-                data.slice(0, 20).forEach(bus => {
-                    if (!bus.eta) return;
-                    const diff = Math.floor((new Date(bus.eta) - now) / 60000);
-                    if (diff < -1) return;
-                    const timeStr = diff <= 0 ? "Arriving" : `${diff} min`;
-                    resultsDiv.innerHTML += `
-                        <div class="bus-card">
-                            <div class="route-no">${bus.route}</div>
-                            <div class="dest">${bus.dest_tc}<br><small>${bus.dest_en}</small></div>
-                            <div class="eta">${timeStr}</div>
-                        </div>`;
-                });
-            }
-            timeDiv.innerText = `Last Updated: ${now.toLocaleTimeString()}`;
-        } catch (e) { resultsDiv.innerHTML = '<div style="text-align:center; color:red;">Connection Error</div>'; }
+        // Sort by arrival time
+        data.sort((a, b) => new Date(a.eta) - new Date(b.eta));
+
+        resultsDiv.innerHTML = '';
+        const now = new Date();
+
+        if (data.length === 0) {
+            resultsDiv.innerHTML = '<div style="text-align:center; padding:20px;">No buses scheduled.</div>';
+        } else {
+            data.slice(0, 20).forEach(bus => {
+                if (!bus.eta) return;
+                const diff = Math.floor((new Date(bus.eta) - now) / 60000);
+                if (diff < -1) return;
+                const timeStr = diff <= 0 ? "Arriving" : `${diff} min`;
+                resultsDiv.innerHTML += `
+                    <div class="bus-card">
+                        <div class="route-no">${bus.route}</div>
+                        <div class="dest">${bus.dest_tc}<br><small>${bus.dest_en}</small></div>
+                        <div class="eta">${timeStr}</div>
+                    </div>`;
+            });
+        }
+        timeDiv.innerText = `Last Updated: ${now.toLocaleTimeString()}`;
+    } catch (e) { 
+        console.error("Fetch failed:", e);
+        resultsDiv.innerHTML = `<div style="text-align:center; color:red; padding:20px;">Error: ${e.message}</div>`; 
     }
-
+}
     loadStops();
     fetchAllETA();
 </script>
