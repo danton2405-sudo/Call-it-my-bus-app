@@ -3,113 +3,25 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Nearby Bus Tracker</title>
+    <title>HK Bus Stop Finder</title>
     <style>
         :root { --ctb-red: #e60012; --ctb-yellow: #ffd900; --ios-blue: #007aff; }
         body { font-family: -apple-system, sans-serif; background: #f0f2f5; margin: 0; padding: 10px; }
         .header { background: white; padding: 15px; border-radius: 15px; box-shadow: 0 2px 10px rgba(0,0,0,0.05); margin-bottom: 10px; text-align: center; }
-        .location-info { font-size: 0.9rem; color: #555; margin-bottom: 10px; font-weight: bold; background: #fff9c4; padding: 5px; border-radius: 5px; }
-        .refresh-btn { background: #28a745; color: white; border: none; padding: 12px; border-radius: 25px; font-weight: bold; cursor: pointer; width: 100%; margin-bottom: 5px; }
+        
+        /* Search Bar Styles */
+        .search-container { margin-bottom: 10px; position: relative; }
+        #stop-search { width: 100%; padding: 12px; border-radius: 10px; border: 1px solid #ccc; box-sizing: border-box; font-size: 1rem; }
+        .search-results { 
+            position: absolute; width: 100%; background: white; z-index: 100; 
+            max-height: 200px; overflow-y: auto; border-radius: 10px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); display: none;
+        }
+        .search-item { padding: 12px; border-bottom: 1px solid #eee; cursor: pointer; text-align: left; font-size: 0.9rem; }
+
+        .refresh-btn { background: #28a745; color: white; border: none; padding: 12px; border-radius: 25px; font-weight: bold; cursor: pointer; width: 100%; margin-bottom: 10px; }
+        .location-info { font-size: 0.9rem; color: #555; margin-bottom: 10px; font-weight: bold; background: #fff9c4; padding: 10px; border-radius: 8px; }
+        
         .bus-card { background: white; padding: 15px; margin-bottom: 8px; border-radius: 12px; display: flex; justify-content: space-between; align-items: center; border-left: 6px solid var(--ctb-yellow); }
         .route-no { font-weight: 900; font-size: 1.6rem; color: var(--ctb-red); min-width: 75px; }
-        .dest { font-size: 0.85rem; font-weight: bold; flex-grow: 1; padding: 0 10px; }
-        .eta { font-weight: bold; color: var(--ios-blue); font-size: 1.3rem; text-align: right; }
-        .loading { text-align: center; padding: 20px; color: #666; }
-    </style>
-</head>
-<body>
-
-<div class="header">
-    <h1 style="font-size: 1.1rem; margin-top:0;">🚌 Nearby Bus Tracker</h1>
-    <div id="current-stop-name" class="location-info">Finding your location...</div>
-    <button class="refresh-btn" onclick="initNearbyTracker()">🔄 Update Location & ETA</button>
-    <div id="last-updated" style="font-size: 0.7rem; color: #888;"></div>
-</div>
-
-<div id="results"></div>
-
-<script>
-    let allStops = []; // To store the list of all Citybus stops
-
-    // 1. Initialize: Fetch all stops first, then get location
-    async function initNearbyTracker() {
-        const resultsDiv = document.getElementById('results');
-        resultsDiv.innerHTML = '<div class="loading">Fetching stop data...</div>';
-
-        try {
-            // Fetch the master list of Citybus stops (cached in memory for this session)
-            if (allStops.length === 0) {
-                const res = await fetch('https://rt.data.gov.hk/v2/transport/citybus/stop/CTB');
-                const json = await res.json();
-                allStops = json.data;
-            }
-
-            // Get User Location
-            navigator.geolocation.getCurrentPosition(async (pos) => {
-                const userLat = pos.coords.latitude;
-                const userLon = pos.coords.longitude;
-
-                const nearestStop = findNearestStop(userLat, userLon);
-                document.getElementById('current-stop-name').innerText = `📍 Near: ${nearestStop.stop_name_tc}`;
-                
-                fetchETAByStop(nearestStop.stop);
-            }, (err) => {
-                resultsDiv.innerHTML = '<div class="loading">Location permission denied.</div>';
-            });
-        } catch (e) {
-            resultsDiv.innerHTML = '<div class="loading">Error loading stop data.</div>';
-        }
-    }
-
-    // 2. Math to find the nearest stop using coordinates
-    function findNearestStop(lat, lon) {
-        return allStops.reduce((prev, curr) => {
-            const prevDist = Math.hypot(lat - prev.lat, lon - prev.long);
-            const currDist = Math.hypot(lat - curr.lat, lon - curr.long);
-            return currDist < prevDist ? curr : prev;
-        });
-    }
-
-    // 3. Fetch ETAs for the found stop ID
-    async function fetchETAByStop(stopId) {
-        const resultsDiv = document.getElementById('results');
-        resultsDiv.innerHTML = '<div class="loading">Fetching live ETAs...</div>';
-
-        try {
-            // Using the "All routes at a stop" endpoint (more efficient for variable locations)
-            const res = await fetch(`https://rt.data.gov.hk/v2/transport/citybus/eta/CTB/${stopId}`);
-            const json = await res.json();
-            let data = json.data || [];
-
-            // Sort by time
-            const now = new Date();
-            data = data.filter(bus => bus.eta).sort((a, b) => new Date(a.eta) - new Date(b.eta));
-
-            resultsDiv.innerHTML = '';
-            if (data.length === 0) {
-                resultsDiv.innerHTML = '<div class="loading">No incoming buses at this stop.</div>';
-            } else {
-                data.slice(0, 15).forEach(bus => {
-                    const diff = Math.floor((new Date(bus.eta) - now) / 60000);
-                    if (diff < -1) return;
-                    const timeStr = diff <= 0 ? "Arr" : `${diff}m`;
-
-                    resultsDiv.innerHTML += `
-                        <div class="bus-card">
-                            <div class="route-no">${bus.route}</div>
-                            <div class="dest">${bus.dest_tc}<br><small>${bus.dest_en}</small></div>
-                            <div class="eta">${timeStr}</div>
-                        </div>`;
-                });
-            }
-            document.getElementById('last-updated').innerText = `Updated: ${now.toLocaleTimeString()}`;
-        } catch (e) {
-            resultsDiv.innerHTML = '<div class="loading">Error fetching ETA.</div>';
-        }
-    }
-
-    // Run on load
-    initNearbyTracker();
-</script>
-</body>
-</html>
+        .dest { font-size: 0.85rem; font-weight: bold; flex-grow: 1; padding: 0 10px; line-height: 1.2; }
+        .eta { font-weight: bold; color: var(--ios-blue); font-size: 1.3rem
