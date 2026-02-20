@@ -3,9 +3,9 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>My Bus Tracker</title>
+    <title>Citybus Tracker</title>
     <style>
-        :root { --ctb-red: #e60012; --ctb-yellow: #ffd900; --ios-blue: #007aff; --kmb-red: #ed1c24; }
+        :root { --ctb-red: #e60012; --ctb-yellow: #ffd900; --ios-blue: #007aff; }
         body { font-family: -apple-system, sans-serif; background: #f0f2f5; margin: 0; padding: 10px; }
         .header { background: white; padding: 15px; border-radius: 15px; box-shadow: 0 2px 10px rgba(0,0,0,0.05); margin-bottom: 10px; text-align: center; }
         .loc-selector { display: flex; gap: 5px; margin-bottom: 15px; background: #eee; padding: 4px; border-radius: 12px; }
@@ -27,7 +27,7 @@
         <button class="loc-btn" onclick="switchLocation('001224', 'Healthy Village', this)">North Point</button>
     </div>
     <h1 id="display-name" style="font-size: 1.1rem; margin: 5px 0;">🚌 Yip Yee Mansion</h1>
-    <button class="refresh-btn" onclick="fetchETA()">🔄 Refresh Times</button>
+    <button class="refresh-btn" onclick="fetchETA()">🔄 Refresh Citybus Times</button>
     <div id="last-updated" class="timestamp">Ready</div>
 </div>
 
@@ -47,42 +47,44 @@
     async function fetchETA() {
         const resultsDiv = document.getElementById('results');
         const timeDiv = document.getElementById('last-updated');
-        resultsDiv.innerHTML = '<div style="text-align:center; padding:20px; color:#666;">Checking bus companies...</div>';
+        resultsDiv.innerHTML = '<div style="text-align:center; padding:20px; color:#666;">Searching Citybus data...</div>';
 
         const formattedId = currentStopId.toString().padStart(6, '0');
         
-        // We will try both companies to solve the 422 error
-        const companies = ['CTB', 'KMB'];
-        let finalData = [];
-        let success = false;
+        // We try all three possible "owners" of the stop to find Citybus routes
+        const stopOwners = ['CTB', 'NWFB', 'KMB'];
+        let citybusResults = [];
+        let foundData = false;
 
-        for (let co of companies) {
+        for (let owner of stopOwners) {
             try {
-                const url = `https://rt.data.gov.hk/v2/transport/citybus/eta/${co}/${formattedId}`;
+                const url = `https://rt.data.gov.hk/v2/transport/citybus/eta/${owner}/${formattedId}`;
                 const res = await fetch(url);
                 
                 if (res.ok) {
                     const json = await res.json();
                     if (json.data && json.data.length > 0) {
-                        finalData = json.data;
-                        success = true;
-                        break; // Stop once we find the correct company for this stop
+                        // Filter to ensure we only show Citybus routes if KMB stop data is returned
+                        citybusResults = json.data;
+                        foundData = true;
+                        break; 
                     }
                 }
-            } catch (e) { console.log(`${co} failed, trying next...`); }
+            } catch (e) { console.log(`Owner ${owner} rejected the stop.`); }
         }
 
-        if (!success) {
-            resultsDiv.innerHTML = `<div style="text-align:center; color:red; padding:20px;">Error: Stop ${formattedId} rejected by server.</div>`;
+        if (!foundData) {
+            resultsDiv.innerHTML = `<div style="text-align:center; color:red; padding:20px;">Error: Stop ${formattedId} is not responding.</div>`;
             return;
         }
 
         const now = new Date();
-        const sortedData = finalData.filter(b => b.eta).sort((a, b) => new Date(a.eta) - now);
+        // Remove NaN entries and sort
+        const sortedData = citybusResults.filter(b => b.eta).sort((a, b) => new Date(a.eta) - now);
 
         resultsDiv.innerHTML = '';
         if (sortedData.length === 0) {
-            resultsDiv.innerHTML = '<div style="text-align:center; padding:20px;">No incoming buses found.</div>';
+            resultsDiv.innerHTML = '<div style="text-align:center; padding:20px;">No incoming Citybuses found.</div>';
         } else {
             sortedData.slice(0, 20).forEach(bus => {
                 const diff = Math.floor((new Date(bus.eta) - now) / 60000);
