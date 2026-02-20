@@ -24,4 +24,33 @@
 <div class="header">
     <div class="loc-selector">
         <button class="loc-btn active" onclick="switchLocation('002159', 'Yip Yee Mansion', this)">Aberdeen</button>
-        <button class="loc-btn" onclick="switchLocation('001224',
+        <button class="loc-btn" onclick="switchLocation('001224', 'Healthy Village', this)">North Point</button>
+    </div>
+    <h1 id="display-name" style="font-size: 1.1rem; margin: 5px 0;">🚌 Yip Yee Mansion</h1>
+    <button class="refresh-btn" onclick="fetchETA()">🔄 Refresh Times</button>
+    <div id="last-updated" class="timestamp">Ready</div>
+</div>
+
+<div id="results"></div>
+
+<script>
+    // Global variable to track the selected stop
+    let currentStopId = '002159';
+
+    // Function to handle tab switching
+    function switchLocation(id, name, btn) {
+        currentStopId = id;
+        document.getElementById('display-name').innerText = "🚌 " + name;
+        
+        // Update button visual states
+        document.querySelectorAll('.loc-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        
+        fetchETA();
+    }
+
+    // Main fetching logic
+    async function fetchETA() {
+        const resultsDiv = document.getElementById('results');
+        const timeDiv = document.getElementById('last-updated');
+        resultsDiv.innerHTML = '<div style
