@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>My Citybus Tracker</title>
+    <title>Citybus Tracker - Final Fix</title>
     <style>
         :root { --ctb-red: #e60012; --ctb-yellow: #ffd900; --ios-blue: #007aff; }
         body { font-family: -apple-system, sans-serif; background: #f0f2f5; margin: 0; padding: 10px; }
@@ -41,13 +41,12 @@
     let currentStopId = '002159';
     let allStops = [];
 
-    // Load stop list for GPS detection
     async function loadStopList() {
         try {
             const res = await fetch('https://rt.data.gov.hk/v2/transport/citybus/stop/CTB');
             const json = await res.json();
             allStops = json.data || [];
-        } catch (e) { console.error("Could not load stops"); }
+        } catch (e) { console.error("Could not load stops list."); }
     }
 
     async function useGPS() {
@@ -58,10 +57,8 @@
         navigator.geolocation.getCurrentPosition(async (pos) => {
             const lat = pos.coords.latitude;
             const lon = pos.coords.longitude;
-            
             if (allStops.length === 0) await loadStopList();
 
-            // Find nearest stop
             const nearest = allStops.reduce((prev, curr) => {
                 const dPrev = Math.hypot(lat - prev.lat, lon - prev.long);
                 const dCurr = Math.hypot(lat - curr.lat, lon - curr.long);
@@ -71,7 +68,7 @@
             status.innerText = `📍 Found: ${nearest.stop_name_tc}`;
             switchLocation(nearest.stop, nearest.stop_name_tc);
         }, (err) => {
-            status.innerText = "GPS Error: Check Safari permissions.";
+            status.innerText = "GPS Error: Please enable location in Safari.";
         }, { enableHighAccuracy: true, timeout: 5000 });
     }
 
@@ -88,12 +85,12 @@
     async function fetchETA() {
         const resultsDiv = document.getElementById('results');
         const timeDiv = document.getElementById('last-updated');
-        resultsDiv.innerHTML = '<div style="text-align:center; padding:20px; color:#666;">Checking data...</div>';
+        resultsDiv.innerHTML = '<div style="text-align:center; padding:20px; color:#666;">Searching for Citybus data...</div>';
 
-        // 1. FIX: Force 6-digit Stop ID to bypass 422 errors
+        // Ensuring Stop ID is a 6-digit string
         const formattedId = currentStopId.toString().padStart(6, '0');
         
-        // 2. FIX: Triple-Check owners to bypass government API rejection
+        // Triple-Check owners to bypass the server rejection (422)
         const owners = ['CTB', 'NWFB', 'KMB'];
         let finalResults = [];
         let found = false;
@@ -110,7 +107,7 @@
                         break; 
                     }
                 }
-            } catch (e) { console.log(`${owner} rejected.`); }
+            } catch (e) { console.warn(`Owner ${owner} rejected stop ${formattedId}`); }
         }
 
         if (!found) {
@@ -119,26 +116,27 @@
         }
 
         const now = new Date();
-        // 3. FIX: Filter out invalid timestamps to prevent NaN errors
         const sortedData = finalResults.filter(b => b.eta).sort((a, b) => new Date(a.eta) - now);
 
         resultsDiv.innerHTML = '';
-        sortedData.slice(0, 20).forEach(bus => {
-            const diff = Math.floor((new Date(bus.eta) - now) / 60000);
-            if (diff < -1) return;
-            const timeStr = diff <= 0 ? "Arriving" : diff + " min";
-            
-            resultsDiv.innerHTML += `
-                <div class="bus-card">
-                    <div class="route-no">${bus.route}</div>
-                    <div class="dest">${bus.dest_tc}<br><small>${bus.dest_en}</small></div>
-                    <div class="eta">${timeStr}</div>
-                </div>`;
-        });
+        if (sortedData.length === 0) {
+            resultsDiv.innerHTML = '<div style="text-align:center; padding:20px;">No incoming buses found.</div>';
+        } else {
+            sortedData.slice(0, 20).forEach(bus => {
+                const diff = Math.floor((new Date(bus.eta) - now) / 60000);
+                if (diff < -1) return;
+                const timeStr = diff <= 0 ? "Arriving" : diff + " min";
+                resultsDiv.innerHTML += `
+                    <div class="bus-card">
+                        <div class="route-no">${bus.route}</div>
+                        <div class="dest">${bus.dest_tc}<br><small>${bus.dest_en}</small></div>
+                        <div class="eta">${timeStr}</div>
+                    </div>`;
+            });
+        }
         timeDiv.innerText = "Last Updated: " + now.toLocaleTimeString();
     }
 
-    // Load initial stop list and first ETA
     loadStopList();
     window.onload = fetchETA;
 </script>
