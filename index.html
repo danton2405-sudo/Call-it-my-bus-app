@@ -41,6 +41,7 @@
     let currentStopId = '002159';
     let allStops = [];
 
+    // Load stop list immediately
     async function loadStopList() {
         try {
             const res = await fetch('https://rt.data.gov.hk/v2/transport/citybus/stop/CTB');
@@ -57,7 +58,12 @@
         navigator.geolocation.getCurrentPosition(async (pos) => {
             const lat = pos.coords.latitude;
             const lon = pos.coords.longitude;
-            if (allStops.length === 0) await loadStopList();
+            
+            // Ensure stop list is loaded before reducing
+            if (allStops.length === 0) {
+                status.innerText = "Loading stop data, please wait...";
+                await loadStopList();
+            }
 
             const nearest = allStops.reduce((prev, curr) => {
                 const dPrev = Math.hypot(lat - prev.lat, lon - prev.long);
@@ -87,10 +93,10 @@
         const timeDiv = document.getElementById('last-updated');
         resultsDiv.innerHTML = '<div style="text-align:center; padding:20px; color:#666;">Searching for Citybus data...</div>';
 
-        // Ensuring Stop ID is a 6-digit string
+        // 1. Force 6-digit ID
         const formattedId = currentStopId.toString().padStart(6, '0');
         
-        // Triple-Check owners to bypass the server rejection (422)
+        // 2. Triple-Check logic
         const owners = ['CTB', 'NWFB', 'KMB'];
         let finalResults = [];
         let found = false;
@@ -137,6 +143,7 @@
         timeDiv.innerText = "Last Updated: " + now.toLocaleTimeString();
     }
 
+    // Load initial data
     loadStopList();
     window.onload = fetchETA;
 </script>
